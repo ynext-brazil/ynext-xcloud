@@ -59,10 +59,7 @@ pub async fn authenticate(store: &mut TokenStore) -> Result<String> {
     store.save_xsts_token(&xsts_token)?;
 
     // 5. Monta o cabeçalho de autorização final
-    let auth_header = format!(
-        "XBL3.0 x={};{}",
-        xsts_token.user_hash, xsts_token.token
-    );
+    let auth_header = format!("XBL3.0 x={};{}", xsts_token.user_hash, xsts_token.token);
 
     info!("✅ Autenticação completa! xCloud pronto.");
     Ok(auth_header)
@@ -90,10 +87,7 @@ async fn try_load_saved_tokens(store: &mut TokenStore) -> Result<Option<String>>
             let xsts_token = xsts::exchange_for_xsts(&xbl_token.token).await?;
             store.save_xsts_token(&xsts_token)?;
 
-            let auth_header = format!(
-                "XBL3.0 x={};{}",
-                xsts_token.user_hash, xsts_token.token
-            );
+            let auth_header = format!("XBL3.0 x={};{}", xsts_token.user_hash, xsts_token.token);
             return Ok(Some(auth_header));
         }
     }

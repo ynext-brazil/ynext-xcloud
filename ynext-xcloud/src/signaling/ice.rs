@@ -47,8 +47,7 @@ pub async fn send_ice_candidates(
 
     debug!(
         count = candidates.len(),
-        "Enviando candidatos ICE para: {}",
-        url
+        "Enviando candidatos ICE para: {}", url
     );
 
     let response = client
@@ -68,7 +67,10 @@ pub async fn send_ice_candidates(
         bail!("Falha ao enviar ICE candidates: HTTP {} — {}", status, body);
     }
 
-    debug!("✅ {} candidatos ICE enviados com sucesso", candidates.len());
+    debug!(
+        "✅ {} candidatos ICE enviados com sucesso",
+        candidates.len()
+    );
     Ok(())
 }
 

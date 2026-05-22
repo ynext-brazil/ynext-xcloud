@@ -201,14 +201,8 @@ pub async fn establish_session(
 
     // Passo 3: Enviar SDP offer e receber answer da Microsoft
     info!("🤝 Negociando SDP com o servidor xCloud...");
-    let sdp_answer = sdp::exchange_sdp(
-        &client,
-        auth_header,
-        XCLOUD_HOST,
-        &session_path,
-        sdp_offer,
-    )
-    .await?;
+    let sdp_answer =
+        sdp::exchange_sdp(&client, auth_header, XCLOUD_HOST, &session_path, sdp_offer).await?;
 
     // Passo 4: Enviar candidatos ICE locais
     info!("🧊 Enviando candidatos ICE...");
@@ -266,7 +260,9 @@ async fn wait_for_provisioned(
                 debug!(attempt, "Sessão ainda sendo provisionada...");
             }
             SessionState::Failed => {
-                let details = state_resp.error_details.unwrap_or_else(|| "sem detalhes".to_string());
+                let details = state_resp
+                    .error_details
+                    .unwrap_or_else(|| "sem detalhes".to_string());
                 anyhow::bail!("❌ Sessão xCloud falhou: {}", details);
             }
             SessionState::Unknown => {
@@ -328,8 +324,7 @@ pub fn device_info_header() -> String {
     });
 
     use base64::Engine;
-    base64::engine::general_purpose::STANDARD
-        .encode(device_info.to_string())
+    base64::engine::general_purpose::STANDARD.encode(device_info.to_string())
 }
 
 // ===========================================================================
@@ -372,7 +367,6 @@ mod tests {
             .decode(&header)
             .expect("Deve ser base64 válido");
         let json_str = String::from_utf8(decoded).expect("Deve ser UTF-8 válido");
-        let _: serde_json::Value = serde_json::from_str(&json_str)
-            .expect("Deve ser JSON válido");
+        let _: serde_json::Value = serde_json::from_str(&json_str).expect("Deve ser JSON válido");
     }
 }

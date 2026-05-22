@@ -69,7 +69,10 @@ pub async fn exchange_sdp(
         );
     }
 
-    debug!("SDP answer recebido com sucesso ({} bytes)", answer.sdp.len());
+    debug!(
+        "SDP answer recebido com sucesso ({} bytes)",
+        answer.sdp.len()
+    );
     Ok(answer.sdp)
 }
 

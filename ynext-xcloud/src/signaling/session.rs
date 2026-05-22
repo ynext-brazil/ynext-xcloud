@@ -61,11 +61,7 @@ pub async fn create_session(
 
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        bail!(
-            "Falha ao criar sessão xCloud: HTTP {} — {}",
-            status,
-            body
-        );
+        bail!("Falha ao criar sessão xCloud: HTTP {} — {}", status, body);
     }
 
     let resp: CreateSessionResponse = response
@@ -74,7 +70,9 @@ pub async fn create_session(
         .context("Falha ao parsear resposta de criação de sessão")?;
 
     resp.session_path.ok_or_else(|| {
-        let msg = resp.message.unwrap_or_else(|| "sem sessionPath na resposta".to_string());
+        let msg = resp
+            .message
+            .unwrap_or_else(|| "sem sessionPath na resposta".to_string());
         anyhow::anyhow!("xCloud não retornou sessionPath: {}", msg)
     })
 }

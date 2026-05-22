@@ -128,11 +128,7 @@ pub async fn exchange_for_xbl(msa_access_token: &str) -> Result<XblToken> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        bail!(
-            "Falha na autenticação XBL: HTTP {} — {}",
-            status,
-            body
-        );
+        bail!("Falha na autenticação XBL: HTTP {} — {}", status, body);
     }
 
     let xbl_resp: XblAuthResponse = response

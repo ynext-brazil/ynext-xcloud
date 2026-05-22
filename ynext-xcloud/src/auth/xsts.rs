@@ -184,14 +184,11 @@ pub async fn exchange_for_xsts(xbl_token: &str) -> Result<XstsToken> {
         })
     } else if status == reqwest::StatusCode::UNAUTHORIZED {
         // Erro de autenticação — decodifica o código de erro XErr
-        let error_resp: XstsErrorResponse = response
-            .json()
-            .await
-            .unwrap_or(XstsErrorResponse {
-                x_err: None,
-                message: None,
-                redirect: None,
-            });
+        let error_resp: XstsErrorResponse = response.json().await.unwrap_or(XstsErrorResponse {
+            x_err: None,
+            message: None,
+            redirect: None,
+        });
 
         let error_msg = format_xsts_error(error_resp);
         bail!("Falha na autenticação XSTS: {}", error_msg);
@@ -221,8 +218,13 @@ fn format_xsts_error(err: XstsErrorResponse) -> String {
             "Esta conta de menor de idade não tem permissão dos pais para acessar o xCloud. \
              O responsável deve conceder permissão em account.microsoft.com/family."
         }
-        Some(code) => return format!("Código de erro desconhecido: {} (XErr={}). \
-             Reporte em github.com/ynext/ynext-xcloud/issues", code, code),
+        Some(code) => {
+            return format!(
+                "Código de erro desconhecido: {} (XErr={}). \
+             Reporte em github.com/ynext/ynext-xcloud/issues",
+                code, code
+            )
+        }
         None => "Erro de autenticação sem código específico.",
     };
 

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! # Ynext-Xcloud — Entrypoint Principal
 //!
 //! Cliente nativo open source para Xbox Cloud Gaming.
@@ -123,7 +125,10 @@ async fn handle_auth_command(action: AuthAction) -> Result<()> {
 
                     // Em modo debug, exibe o header (apenas para desenvolvimento)
                     if std::env::var("XCLOUD_DEBUG_TOKENS").is_ok() {
-                        println!("🔐 Auth Header (DEBUG): {}", &auth_header[..50.min(auth_header.len())]);
+                        println!(
+                            "🔐 Auth Header (DEBUG): {}",
+                            &auth_header[..50.min(auth_header.len())]
+                        );
                     }
                 }
                 Err(e) => {
@@ -158,7 +163,10 @@ async fn handle_auth_command(action: AuthAction) -> Result<()> {
                         if let Some(xuid) = &xsts.xuid {
                             println!("🆔 XUID: {}", xuid);
                         }
-                        println!("⏰ Token expira em: {}", xsts.expires_at.format("%d/%m/%Y %H:%M UTC"));
+                        println!(
+                            "⏰ Token expira em: {}",
+                            xsts.expires_at.format("%d/%m/%Y %H:%M UTC")
+                        );
                     }
                 }
             } else {
@@ -176,7 +184,7 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
 
     println!();
     println!("🎮 Iniciando Ynext-Xcloud Streaming...");
-    
+
     if let Some(game_name) = game {
         println!("   Jogo selecionado: '{}'", game_name);
     }
@@ -207,8 +215,14 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
             println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
             println!("╠══════════════════════════════════════════════════════════╣");
             println!("║  Session ID: {:<43} ║", &session.session_id);
-            println!("║  Tamanho SDP Answer: {:<35} ║", format!("{} bytes", session.sdp_answer.len()));
-            println!("║  ICE Remotos Recebidos: {:<32} ║", session.ice_candidates.len());
+            println!(
+                "║  Tamanho SDP Answer: {:<35} ║",
+                format!("{} bytes", session.sdp_answer.len())
+            );
+            println!(
+                "║  ICE Remotos Recebidos: {:<32} ║",
+                session.ice_candidates.len()
+            );
             println!("╚══════════════════════════════════════════════════════════╝");
             println!();
             println!("⚠️  Fase 3 (GStreamer Pipeline) não iniciada.");
@@ -240,7 +254,10 @@ async fn handle_info_command() -> Result<()> {
         if let Some(xuid) = &xsts.xuid {
             println!("║  XUID: {:<51}║", xuid);
         }
-        println!("║  User Hash: {:<46}║", &xsts.user_hash[..20.min(xsts.user_hash.len())]);
+        println!(
+            "║  User Hash: {:<46}║",
+            &xsts.user_hash[..20.min(xsts.user_hash.len())]
+        );
 
         let status = if xsts.is_expired() {
             "⚠️  Expirado"
@@ -248,7 +265,10 @@ async fn handle_info_command() -> Result<()> {
             "✅ Válido"
         };
         println!("║  Token XSTS: {:<45}║", status);
-        println!("║  Expira em: {:<46}║", xsts.expires_at.format("%d/%m/%Y %H:%M UTC"));
+        println!(
+            "║  Expira em: {:<46}║",
+            xsts.expires_at.format("%d/%m/%Y %H:%M UTC")
+        );
     } else {
         println!("║  Status: ❌ Não autenticado                              ║");
         println!("║  Execute: ynext-xcloud auth login                        ║");

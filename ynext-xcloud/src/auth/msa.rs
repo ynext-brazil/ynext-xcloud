@@ -34,8 +34,7 @@ const DEVICE_CODE_ENDPOINT: &str =
     "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
 
 /// Endpoint para Token Exchange (polling)
-const TOKEN_ENDPOINT: &str =
-    "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+const TOKEN_ENDPOINT: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 
 /// Intervalo padrão de polling (segundos) — será sobrescrito pelo server_interval
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 5;
@@ -168,10 +167,7 @@ fn build_http_client() -> Result<reqwest::Client> {
 
 /// Solicita o device_code ao servidor Microsoft
 async fn request_device_code(client: &reqwest::Client) -> Result<DeviceCodeResponse> {
-    let params = [
-        ("client_id", XBOX_APP_CLIENT_ID),
-        ("scope", MSA_SCOPE),
-    ];
+    let params = [("client_id", XBOX_APP_CLIENT_ID), ("scope", MSA_SCOPE)];
 
     debug!("Solicitando device_code ao servidor Microsoft...");
 
@@ -185,7 +181,11 @@ async fn request_device_code(client: &reqwest::Client) -> Result<DeviceCodeRespo
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        bail!("Falha na requisição de device_code: HTTP {} — {}", status, body);
+        bail!(
+            "Falha na requisição de device_code: HTTP {} — {}",
+            status,
+            body
+        );
     }
 
     let device_code_resp: DeviceCodeResponse = response
@@ -215,10 +215,16 @@ fn display_auth_instructions(resp: &DeviceCodeResponse) {
     println!("║  2. Digite o código abaixo quando solicitado:               ║");
     println!("║                                                              ║");
     println!("║              ┌─────────────────┐                            ║");
-    println!("║              │   {}        │                            ║", resp.user_code);
+    println!(
+        "║              │   {}        │                            ║",
+        resp.user_code
+    );
     println!("║              └─────────────────┘                            ║");
     println!("║                                                              ║");
-    println!("║  ⏳ Aguardando autorização... (expira em {}s)         ║", resp.expires_in);
+    println!(
+        "║  ⏳ Aguardando autorização... (expira em {}s)         ║",
+        resp.expires_in
+    );
     println!("║                                                              ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
@@ -229,11 +235,10 @@ async fn poll_for_tokens(
     client: &reqwest::Client,
     device_code_resp: &DeviceCodeResponse,
 ) -> Result<MsaTokens> {
-    let poll_interval = StdDuration::from_secs(
-        device_code_resp.interval.max(DEFAULT_POLL_INTERVAL_SECS)
-    );
-    let timeout_at = std::time::Instant::now()
-        + StdDuration::from_secs(device_code_resp.expires_in);
+    let poll_interval =
+        StdDuration::from_secs(device_code_resp.interval.max(DEFAULT_POLL_INTERVAL_SECS));
+    let timeout_at =
+        std::time::Instant::now() + StdDuration::from_secs(device_code_resp.expires_in);
 
     let mut attempt = 0u32;
 
@@ -349,7 +354,10 @@ mod tests {
         };
 
         assert!(tokens.is_access_token_valid(), "Token deveria ser válido");
-        assert!(tokens.has_valid_refresh_token(), "Deveria ter refresh_token");
+        assert!(
+            tokens.has_valid_refresh_token(),
+            "Deveria ter refresh_token"
+        );
     }
 
     #[test]
@@ -362,7 +370,13 @@ mod tests {
             expires_at: Utc::now() - Duration::hours(1), // Expirado há 1 hora
         };
 
-        assert!(!tokens.is_access_token_valid(), "Token deveria estar expirado");
-        assert!(tokens.has_valid_refresh_token(), "Ainda deveria ter refresh_token");
+        assert!(
+            !tokens.is_access_token_valid(),
+            "Token deveria estar expirado"
+        );
+        assert!(
+            tokens.has_valid_refresh_token(),
+            "Ainda deveria ter refresh_token"
+        );
     }
 }

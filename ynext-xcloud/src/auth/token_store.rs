@@ -105,8 +105,7 @@ impl TokenStore {
     /// Remove TODOS os tokens salvos (logout completo)
     pub fn clear_all(&self) -> Result<()> {
         if self.tokens_path.exists() {
-            fs::remove_file(&self.tokens_path)
-                .context("Falha ao remover arquivo de tokens")?;
+            fs::remove_file(&self.tokens_path).context("Falha ao remover arquivo de tokens")?;
             info!("🗑️  Tokens removidos de {}", self.tokens_path.display());
         }
         Ok(())
@@ -127,8 +126,8 @@ impl TokenStore {
             return Ok(StoredTokens::default());
         }
 
-        let content = fs::read_to_string(&self.tokens_path)
-            .context("Falha ao ler arquivo de tokens")?;
+        let content =
+            fs::read_to_string(&self.tokens_path).context("Falha ao ler arquivo de tokens")?;
 
         serde_json::from_str(&content)
             .context("Falha ao parsear tokens do arquivo (arquivo corrompido?)")
@@ -140,12 +139,10 @@ impl TokenStore {
         ensure_config_dir(&self.tokens_path)?;
 
         // Serializa como JSON indentado
-        let json = serde_json::to_string_pretty(stored)
-            .context("Falha ao serializar tokens")?;
+        let json = serde_json::to_string_pretty(stored).context("Falha ao serializar tokens")?;
 
         // Escreve o arquivo
-        fs::write(&self.tokens_path, &json)
-            .context("Falha ao escrever arquivo de tokens")?;
+        fs::write(&self.tokens_path, &json).context("Falha ao escrever arquivo de tokens")?;
 
         // Define permissões restritas (somente owner pode ler/escrever)
         set_secure_permissions(&self.tokens_path)?;
@@ -166,24 +163,20 @@ impl Default for TokenStore {
 
 /// Retorna o caminho do arquivo de tokens: `~/.config/ynext-xcloud/tokens.json`
 fn get_tokens_path() -> PathBuf {
-    let config_dir = dirs::config_dir()
-        .unwrap_or_else(|| {
-            warn!("Não foi possível determinar diretório de config — usando ~/.ynext-xcloud");
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".ynext-xcloud")
-        });
+    let config_dir = dirs::config_dir().unwrap_or_else(|| {
+        warn!("Não foi possível determinar diretório de config — usando ~/.ynext-xcloud");
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".ynext-xcloud")
+    });
 
-    config_dir
-        .join("ynext-xcloud")
-        .join("tokens.json")
+    config_dir.join("ynext-xcloud").join("tokens.json")
 }
 
 /// Cria o diretório de configuração com permissões seguras (chmod 700)
 fn ensure_config_dir(tokens_path: &std::path::Path) -> Result<()> {
     if let Some(parent) = tokens_path.parent() {
-        fs::create_dir_all(parent)
-            .context("Falha ao criar diretório de configuração")?;
+        fs::create_dir_all(parent).context("Falha ao criar diretório de configuração")?;
 
         // chmod 700 no diretório (somente owner pode listar/entrar)
         #[cfg(unix)]
@@ -225,10 +218,10 @@ fn set_secure_permissions(path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
-    use tempfile::tempdir;
     use crate::auth::msa::MsaTokens;
     use crate::auth::xsts::XstsToken;
+    use chrono::Utc;
+    use tempfile::tempdir;
 
     fn mock_store(dir: &std::path::Path) -> TokenStore {
         TokenStore {

@@ -1,0 +1,79 @@
+name: CI — Build e Testes
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ============================================================
+  # Build e Testes no Linux
+  # ============================================================
+  test-linux:
+    name: 🐧 Linux (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🦀 Instalar Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 📦 Cache de dependências
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ynext-xcloud"
+
+      - name: 📚 Instalar dependências do sistema (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            libsecret-1-dev \
+            libdbus-1-dev
+
+      - name: ✅ Verificar formatação
+        run: cargo fmt --manifest-path ynext-xcloud/Cargo.toml -- --check
+
+      - name: 🔍 Clippy (lints de qualidade)
+        run: cargo clippy --manifest-path ynext-xcloud/Cargo.toml -- -D warnings
+
+      - name: 🧪 Rodar testes
+        run: cargo test --manifest-path ynext-xcloud/Cargo.toml
+
+      - name: 🔨 Build release
+        run: cargo build --release --manifest-path ynext-xcloud/Cargo.toml
+
+  # ============================================================
+  # Build no Windows
+  # ============================================================
+  test-windows:
+    name: 🪟 Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🦀 Instalar Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 📦 Cache de dependências
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ynext-xcloud"
+
+      - name: 🧪 Rodar testes
+        run: cargo test --manifest-path ynext-xcloud/Cargo.toml
+
+      - name: 🔨 Build release
+        run: cargo build --release --manifest-path ynext-xcloud/Cargo.toml

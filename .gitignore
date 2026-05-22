@@ -1,0 +1,27 @@
+# Rust / Cargo
+/target/
+ynext-xcloud/target/
+Cargo.lock  # Comentar esta linha se for biblioteca; manter para binário
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Ambientes
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Tokens de desenvolvimento (NUNCA versionar!)
+*.token
+*.credentials
+dev_tokens.json

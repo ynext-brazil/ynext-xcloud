@@ -1,0 +1,107 @@
+[package]
+name = "ynext-xcloud"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ynext - Agência de Automação <contato@ynext.com.br>"]
+description = "Cliente nativo open source para Xbox Cloud Gaming — altíssimo desempenho, zero navegador"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ynext/ynext-xcloud"
+homepage = "https://github.com/ynext/ynext-xcloud"
+readme = "README.md"
+keywords = ["xcloud", "xbox", "gamestreaming", "gaming", "rust"]
+categories = ["multimedia", "games"]
+rust-version = "1.75"
+
+# ===========================================================================
+# Perfis de build otimizados
+# ===========================================================================
+[profile.release]
+opt-level = 3
+lto = "thin"         # Link-Time Optimization — reduz binário e melhora perf
+codegen-units = 1    # Mais lento de compilar, mas binário mais otimizado
+strip = true         # Remove símbolos de debug do release
+panic = "abort"      # Menor binário, sem stack unwinding no release
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# ===========================================================================
+# Dependências — Módulo 1: Autenticação
+# ===========================================================================
+[dependencies]
+# Async runtime
+tokio = { version = "1.38", features = ["full"] }
+
+# HTTP client com suporte a TLS nativo
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",    # TLS via rustls (sem dependência de OpenSSL do sistema)
+    "gzip",
+    "brotli",
+    "charset",
+    "http2",
+] }
+
+# Serialização/Deserialização
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Erros idiomáticos
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging e tracing estruturado
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
+
+# Sem dependência externa de keyring — usamos arquivo JSON criptografado com chmod 600
+# Isso garante zero dependências de sistema (sem D-Bus, sem libsecret, sem OpenSSL)
+# Abordagem idêntica ao GitHub CLI (gh) e kubectl
+
+# Geração de código aleatório (code_verifier para PKCE)
+rand = "0.8"
+
+# Base64 para PKCE
+base64 = "0.22"
+
+# SHA256 para PKCE code_challenge
+sha2 = "0.10"
+
+# Parsing de URLs
+url = { version = "2.5", features = ["serde"] }
+
+# Data/hora para expiração de tokens
+chrono = { version = "0.4", features = ["serde"] }
+
+# Configurações do usuário
+dirs = "5.0"
+
+# Interface de linha de comando
+clap = { version = "4.5", features = ["derive", "color", "unicode"] }
+
+# Parsing de configuração
+toml = "0.8"
+
+# UUID para session IDs
+uuid = { version = "1.9", features = ["v4", "serde"] }
+
+# ===========================================================================
+# Dependências opcionais — ativadas por feature flags para os próximos módulos
+# ===========================================================================
+
+# [features]
+# default = ["auth"]
+# auth = []
+# streaming = ["gstreamer", "sdl2"]
+
+[dev-dependencies]
+# Mocking de HTTP para testes
+mockito = "1.4"
+tokio-test = "0.4"
+# Diretórios temporários para testes do token store
+tempfile = "3.10"
+
+[[bin]]
+name = "ynext-xcloud"
+path = "src/main.rs"

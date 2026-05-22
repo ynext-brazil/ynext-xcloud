@@ -4,6 +4,7 @@
 //! Construído com Rust para altíssimo desempenho e mínimo consumo de recursos.
 
 mod auth;
+mod signaling;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

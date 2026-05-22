@@ -30,7 +30,7 @@ use crate::auth::token_store::TokenStore;
 
 Streaming de altíssimo desempenho com aceleração de hardware.
 Zero dependência de navegador. Zero input lag.",
-    author = "Ynext - Agência de Automação"
+    author = "Ynext - Tecnologia e Automação"
 )]
 struct Cli {
     /// Nível de log (error, warn, info, debug, trace)

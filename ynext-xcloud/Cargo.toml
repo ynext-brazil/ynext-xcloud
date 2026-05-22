@@ -2,7 +2,7 @@
 name = "ynext-xcloud"
 version = "0.1.0"
 edition = "2021"
-authors = ["Ynext - Agência de Automação <contato@ynext.com.br>"]
+authors = ["Ynext - Tecnologia e Automação <contato@ynext.com.br>"]
 description = "Cliente nativo open source para Xbox Cloud Gaming — altíssimo desempenho, zero navegador"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ynext/ynext-xcloud"

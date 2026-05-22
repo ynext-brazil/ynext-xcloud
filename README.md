@@ -155,5 +155,5 @@ Dual-licensed sob **MIT** ou **Apache-2.0** — você escolhe.
 ---
 
 <div align="center">
-  Feito com 🦀 por <a href="https://github.com/ynext-brazil">Ynext - Agência de Automação</a>
+  Feito com 🦀 por <a href="https://github.com/ynext-brazil">Ynext - Tecnologia e Automação</a>
 </div>

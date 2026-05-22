@@ -7,12 +7,17 @@
 
 mod auth;
 mod signaling;
+mod video;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::{info, Level};
 
 use crate::auth::token_store::TokenStore;
+
+// Imports GStreamer (Fase 3 — Pipeline de Vídeo)
+use gstreamer::prelude::*;
+
 
 // ===========================================================================
 // CLI — Interface de Linha de Comando
@@ -178,19 +183,19 @@ async fn handle_auth_command(action: AuthAction) -> Result<()> {
     Ok(())
 }
 
-/// Handler para comando de streaming (Fase 2 - Sinalização)
+/// Handler para comando de streaming (Fase 3 — Pipeline GStreamer)
 async fn handle_stream_command(game: Option<String>) -> Result<()> {
     let mut store = TokenStore::new();
 
     println!();
     println!("🎮 Iniciando Ynext-Xcloud Streaming...");
 
-    if let Some(game_name) = game {
+    if let Some(ref game_name) = game {
         println!("   Jogo selecionado: '{}'", game_name);
     }
     println!();
 
-    // 1. Garantir que o usuário está autenticado e com token XSTS válido
+    // 1. Verificar autenticação e obter token XBL3.0
     let auth_header = match auth::authenticate(&mut store).await {
         Ok(header) => header,
         Err(e) => {
@@ -201,41 +206,135 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
     };
 
     println!("✅ Autenticação confirmada (Token XBL3.0)");
+    println!("⏳ Iniciando pipeline GStreamer e conectando ao xCloud...");
+    println!();
 
-    // 2. Mock do SDP Offer e ICE Candidates (serão substituídos pelo GStreamer na Fase 3)
-    // Usamos um SDP H.264 básico para testes de handshake com a Microsoft.
-    let mock_sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n";
-    let mock_local_ice = vec![]; // Sem candidatos ICE locais por enquanto
+    // 2. Inicializa o GStreamer para gerar o SDP Offer real via webrtcbin
+    gstreamer::init().map_err(|e| anyhow::anyhow!("Falha ao inicializar GStreamer: {}", e))?;
 
-    // 3. Iniciar fluxo de sinalização WebRTC (SDP/ICE)
-    match crate::signaling::establish_session(&auth_header, mock_sdp_offer, mock_local_ice).await {
-        Ok(session) => {
+    // 3. Cria o elemento webrtcbin para gerar o SDP Offer real
+    //    Este SDP Offer será enviado para a API da Microsoft na Fase 2
+    let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
+        .name("sdp_generator")
+        .property_from_str("bundle-policy", "max-bundle")
+        .build()
+        .map_err(|e| anyhow::anyhow!(
+            "Falha ao criar webrtcbin para gerar SDP Offer. \
+             Instale gstreamer1.0-plugins-bad: {}", e
+        ))?;
+
+    // 4. Canal one-shot para receber o SDP Offer gerado pelo webrtcbin
+    let (sdp_tx, sdp_rx) = tokio::sync::oneshot::channel::<String>();
+    let sdp_tx = std::sync::Arc::new(tokio::sync::Mutex::new(Some(sdp_tx)));
+
+    // Conecta o sinal `on-negotiation-needed` para capturar o SDP Offer
+    let sdp_tx_clone = sdp_tx.clone();
+    webrtcbin.connect("on-negotiation-needed", false, move |args| {
+        let webrtc = &args[0].get::<gstreamer::Element>().unwrap();
+        let promise = gstreamer::Promise::with_change_func({
+            let sdp_tx = sdp_tx_clone.clone();
+            let webrtc = webrtc.clone();
+            move |reply| {
+                if let Ok(Some(s)) = reply {
+                    if let Ok(offer) = s.get::<gstreamer_webrtc::WebRTCSessionDescription>("offer") {
+                        let sdp_text = offer.sdp().as_text().unwrap_or_default();
+                        // Envia o SDP Offer para o canal
+                        let rt = tokio::runtime::Handle::try_current();
+                        if let Ok(rt) = rt {
+                            let sdp_tx = sdp_tx.clone();
+                            rt.spawn(async move {
+                                let mut guard = sdp_tx.lock().await;
+                                if let Some(tx) = guard.take() {
+                                    let _ = tx.send(sdp_text);
+                                }
+                            });
+                        }
+                        // Configura o SDP Offer como "local description"
+                        webrtc.emit_by_name::<()>(
+                            "set-local-description",
+                            &[&offer, &None::<gstreamer::Promise>],
+                        );
+                    }
+                }
+            }
+        });
+        webrtc.emit_by_name::<()>("create-offer", &[&None::<gstreamer::Structure>, &promise]);
+        None
+    });
+
+    // Inicia o webrtcbin para disparar `on-negotiation-needed`
+    let tmp_pipeline = gstreamer::Pipeline::new();
+    tmp_pipeline.add(&webrtcbin).ok();
+    tmp_pipeline.set_state(gstreamer::State::Playing).ok();
+
+    // 5. Aguarda o SDP Offer gerado pelo GStreamer (timeout de 10s)
+    let sdp_offer = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        sdp_rx,
+    ).await {
+        Ok(Ok(sdp)) => {
+            println!("✅ SDP Offer gerado pelo webrtcbin ({} bytes)", sdp.len());
+            sdp
+        }
+        _ => {
+            // Fallback: usa um SDP H.264 mínimo válido para testes de sinalização
+            tracing::warn!("⚠️  Timeout ao gerar SDP via webrtcbin — usando SDP mínimo de fallback");
+            "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n\
+             m=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n".to_string()
+        }
+    };
+
+    tmp_pipeline.set_state(gstreamer::State::Null).ok();
+
+    // 6. Negociar sessão WebRTC com o xCloud (Fase 2)
+    let session = match crate::signaling::establish_session(&auth_header, &sdp_offer, vec![]).await {
+        Ok(s) => {
             println!();
             println!("╔══════════════════════════════════════════════════════════╗");
             println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
             println!("╠══════════════════════════════════════════════════════════╣");
-            println!("║  Session ID: {:<43} ║", &session.session_id);
-            println!(
-                "║  Tamanho SDP Answer: {:<35} ║",
-                format!("{} bytes", session.sdp_answer.len())
-            );
-            println!(
-                "║  ICE Remotos Recebidos: {:<32} ║",
-                session.ice_candidates.len()
-            );
+            println!("║  Session ID: {:<43} ║", &s.session_id);
+            println!("║  SDP Answer: {:<43} ║", format!("{} bytes", s.sdp_answer.len()));
+            println!("║  ICE Remotos: {:<42} ║", s.ice_candidates.len());
             println!("╚══════════════════════════════════════════════════════════╝");
             println!();
-            println!("⚠️  Fase 3 (GStreamer Pipeline) não iniciada.");
-            println!("   Streaming de vídeo será integrado no próximo passo.");
+            s
         }
         Err(e) => {
             eprintln!("❌ Falha na sinalização WebRTC com o xCloud: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // 7. Iniciar pipeline GStreamer com a sessão estabelecida (Fase 3)
+    println!("▶️  Iniciando pipeline de vídeo H.264 com aceleração de hardware...");
+
+    match video::start_pipeline(session).await {
+        Ok(handle) => {
+            println!("✅ Pipeline em execução! Pressione Ctrl+C para encerrar.");
+
+            // Aguarda sinal de interrupção (Ctrl+C)
+            tokio::signal::ctrl_c()
+                .await
+                .map_err(|e| anyhow::anyhow!("Falha ao registrar handler Ctrl+C: {}", e))?;
+
+            println!();
+            println!("🛑 Encerrando streaming...");
+
+            // Envia sinal de shutdown para o pipeline
+            let _ = handle.shutdown_tx.send(());
+        }
+        Err(e) => {
+            eprintln!("❌ Falha ao iniciar pipeline GStreamer: {}", e);
+            eprintln!("💡 Certifique-se que os seguintes pacotes estão instalados:");
+            eprintln!("   sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-vaapi");
             std::process::exit(1);
         }
     }
 
     Ok(())
 }
+
 
 /// Handler para exibir informações da conta
 async fn handle_info_command() -> Result<()> {

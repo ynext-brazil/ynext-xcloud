@@ -5,8 +5,8 @@ edition = "2021"
 authors = ["Ynext - Tecnologia e Automação <contato@ynext.com.br>"]
 description = "Cliente nativo open source para Xbox Cloud Gaming — altíssimo desempenho, zero navegador"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/ynext/ynext-xcloud"
-homepage = "https://github.com/ynext/ynext-xcloud"
+repository = "https://github.com/ynext-brazil/ynext-xcloud"
+homepage = "https://github.com/ynext-brazil/ynext-xcloud"
 readme = "README.md"
 keywords = ["xcloud", "xbox", "gamestreaming", "gaming", "rust"]
 categories = ["multimedia", "games"]
@@ -27,6 +27,14 @@ opt-level = 0
 debug = true
 
 # ===========================================================================
+# Feature flags por plataforma
+# ===========================================================================
+[features]
+default = []
+# Ativa o sink OpenGL (Linux/macOS). Desativado no Windows (usa d3d11videosink)
+gl-sink = ["gstreamer-gl"]
+
+# ===========================================================================
 # Dependências — Módulo 1: Autenticação
 # ===========================================================================
 [dependencies]
@@ -36,7 +44,7 @@ tokio = { version = "1.38", features = ["full"] }
 # HTTP client com suporte a TLS nativo
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
-    "rustls-tls",    # TLS via rustls (sem dependência de OpenSSL do sistema)
+    "rustls-tls",
     "gzip",
     "brotli",
     "charset",
@@ -54,10 +62,6 @@ anyhow = "1.0"
 # Logging e tracing estruturado
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
-
-# Sem dependência externa de keyring — usamos arquivo JSON criptografado com chmod 600
-# Isso garante zero dependências de sistema (sem D-Bus, sem libsecret, sem OpenSSL)
-# Abordagem idêntica ao GitHub CLI (gh) e kubectl
 
 # Geração de código aleatório (code_verifier para PKCE)
 rand = "0.8"
@@ -87,13 +91,24 @@ toml = "0.8"
 uuid = { version = "1.9", features = ["v4", "serde"] }
 
 # ===========================================================================
-# Dependências opcionais — ativadas por feature flags para os próximos módulos
+# Dependências — Módulo 3: Pipeline de Vídeo GStreamer (Zero-Copy)
 # ===========================================================================
 
-# [features]
-# default = ["auth"]
-# auth = []
-# streaming = ["gstreamer", "sdl2"]
+# Core do GStreamer — wrapper Rust seguro sobre as libs C do GStreamer
+gstreamer = { version = "0.23", features = ["v1_22"] }
+
+# Elemento webrtcbin — nucleio WebRTC (SDP/ICE + DTLS + SRTP)
+# É PROIBIDO usar webrtc-rs isolado; toda negociação ocorre aqui dentro
+gstreamer-webrtc = { version = "0.23" }
+
+# Parsing e manipulação de SDP
+gstreamer-sdp = { version = "0.23" }
+
+# Tipos de vídeo (caps, formatos, dimensões)
+gstreamer-video = { version = "0.23" }
+
+# Sink OpenGL — Zero-Copy de buffer de vídeo (feature opcional)
+gstreamer-gl = { version = "0.23", optional = true }
 
 [dev-dependencies]
 # Mocking de HTTP para testes

@@ -38,8 +38,14 @@ jobs:
           sudo apt-get install -y \
             libssl-dev \
             pkg-config \
-            libsecret-1-dev \
-            libdbus-1-dev
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-vaapi \
+            gstreamer1.0-gl
 
       - name: ✅ Verificar formatação
         run: cargo fmt --manifest-path ynext-xcloud/Cargo.toml -- --check

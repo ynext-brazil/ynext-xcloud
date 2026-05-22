@@ -170,18 +170,56 @@ async fn handle_auth_command(action: AuthAction) -> Result<()> {
     Ok(())
 }
 
-/// Handler para comando de streaming (será implementado na Fase 2)
+/// Handler para comando de streaming (Fase 2 - Sinalização)
 async fn handle_stream_command(game: Option<String>) -> Result<()> {
+    let mut store = TokenStore::new();
+
     println!();
-    println!("⚠️  Módulo de streaming ainda em desenvolvimento!");
-    println!();
-    println!("   Fase atual: 1/6 — Autenticação");
-    println!("   Próxima fase: Sinalização WebRTC (SDP/ICE)");
-    println!();
+    println!("🎮 Iniciando Ynext-Xcloud Streaming...");
+    
     if let Some(game_name) = game {
-        println!("   Jogo solicitado: '{}'", game_name);
-        println!("   (será suportado na Fase 2)");
+        println!("   Jogo selecionado: '{}'", game_name);
     }
+    println!();
+
+    // 1. Garantir que o usuário está autenticado e com token XSTS válido
+    let auth_header = match auth::authenticate(&mut store).await {
+        Ok(header) => header,
+        Err(e) => {
+            eprintln!("❌ Erro de autenticação: {}", e);
+            eprintln!("💡 Execute 'ynext-xcloud auth login' para se autenticar.");
+            std::process::exit(1);
+        }
+    };
+
+    println!("✅ Autenticação confirmada (Token XBL3.0)");
+
+    // 2. Mock do SDP Offer e ICE Candidates (serão substituídos pelo GStreamer na Fase 3)
+    // Usamos um SDP H.264 básico para testes de handshake com a Microsoft.
+    let mock_sdp_offer = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n";
+    let mock_local_ice = vec![]; // Sem candidatos ICE locais por enquanto
+
+    // 3. Iniciar fluxo de sinalização WebRTC (SDP/ICE)
+    match crate::signaling::establish_session(&auth_header, mock_sdp_offer, mock_local_ice).await {
+        Ok(session) => {
+            println!();
+            println!("╔══════════════════════════════════════════════════════════╗");
+            println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
+            println!("╠══════════════════════════════════════════════════════════╣");
+            println!("║  Session ID: {:<43} ║", &session.session_id);
+            println!("║  Tamanho SDP Answer: {:<35} ║", format!("{} bytes", session.sdp_answer.len()));
+            println!("║  ICE Remotos Recebidos: {:<32} ║", session.ice_candidates.len());
+            println!("╚══════════════════════════════════════════════════════════╝");
+            println!();
+            println!("⚠️  Fase 3 (GStreamer Pipeline) não iniciada.");
+            println!("   Streaming de vídeo será integrado no próximo passo.");
+        }
+        Err(e) => {
+            eprintln!("❌ Falha na sinalização WebRTC com o xCloud: {}", e);
+            std::process::exit(1);
+        }
+    }
+
     Ok(())
 }
 

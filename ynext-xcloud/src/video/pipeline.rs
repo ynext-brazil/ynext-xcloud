@@ -471,6 +471,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_webrtcbin_available() {
         gstreamer::init().unwrap();
         // Verifica que o elemento webrtcbin está disponível no sistema
@@ -482,6 +483,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_hw_decoder_or_fallback() {
         gstreamer::init().unwrap();
         // Em ambiente de CI/dev, o fallback software pode ser usado

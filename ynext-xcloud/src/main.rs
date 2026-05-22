@@ -6,8 +6,8 @@
 //! Construído com Rust para altíssimo desempenho e mínimo consumo de recursos.
 
 mod auth;
-mod signaling;
 mod input;
+mod signaling;
 #[cfg(feature = "streaming")]
 mod video;
 

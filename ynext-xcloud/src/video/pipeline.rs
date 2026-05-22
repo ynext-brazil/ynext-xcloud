@@ -222,7 +222,7 @@ impl GstreamerPipeline {
     /// - O GStreamer emite um evento de EOS (End of Stream)
     /// - Ocorre um erro irrecuperável no bus
     pub fn run(
-        &self, 
+        &self,
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
         mut input_rx: tokio::sync::mpsc::Receiver<crate::input::InputReport>,
     ) -> Result<()> {

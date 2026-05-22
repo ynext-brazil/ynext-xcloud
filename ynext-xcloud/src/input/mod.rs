@@ -1,8 +1,8 @@
 pub mod protocol;
 
-use std::time::Duration;
 use anyhow::Result;
 use gilrs::{Event, Gilrs};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -39,13 +39,18 @@ impl InputManager {
                 }
 
                 // Processa todos os eventos pendentes no gilrs
-                while let Some(Event { id, event: _, time: _ }) = self.gilrs.next_event() {
+                while let Some(Event {
+                    id,
+                    event: _,
+                    time: _,
+                }) = self.gilrs.next_event()
+                {
                     // Ignoramos o detalhe do evento e apenas enviamos o state atual inteiro
                     // do controle para o pipeline GStreamer.
                     if let Some(gamepad) = self.gilrs.connected_gamepad(id) {
                         let index: usize = id.into();
                         let report = InputReport::from_gamepad(&gamepad, index as u8);
-                        
+
                         // Envia para o canal MPSC (non-blocking)
                         if let Err(e) = self.input_tx.try_send(report) {
                             error!("Falha ao enviar InputReport: {}", e);

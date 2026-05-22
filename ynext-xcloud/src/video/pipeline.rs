@@ -53,6 +53,8 @@ pub struct GstreamerPipeline {
     webrtcbin: gstreamer::Element,
     /// ID da sessão xCloud (para logs)
     session_id: String,
+    /// Canal de dados WebRTC (para input/gamepad)
+    datachannel: Option<gstreamer::Object>,
 }
 
 impl GstreamerPipeline {
@@ -118,10 +120,35 @@ impl GstreamerPipeline {
 
         info!(session_id = %session_id, "✅ Pipeline GStreamer criado");
 
+        // Cria o DataChannel para Input ("input") antes da negociação
+        let datachannel = webrtcbin.emit_by_name::<Option<gstreamer::Object>>(
+            "create-data-channel",
+            &[&"input", &None::<gstreamer::Structure>],
+        );
+
+        if let Some(ref dc) = datachannel {
+            info!("🎮 WebRTC DataChannel 'input' criado com sucesso");
+            // Conecta o sinal on-open para confirmar quando o canal estiver pronto
+            dc.connect("on-open", false, |_args| {
+                info!("🌐 WebRTC DataChannel 'input' ABERTO e pronto para envio");
+                None
+            });
+            // Opcional: on-error
+            dc.connect("on-error", false, |args| {
+                if let Some(err) = args[1].get::<gstreamer::glib::Error>().ok() {
+                    error!("❌ Erro no DataChannel 'input': {}", err);
+                }
+                None
+            });
+        } else {
+            error!("❌ Falha ao criar WebRTC DataChannel 'input'");
+        }
+
         Ok(Self {
             pipeline,
             webrtcbin,
             session_id: session_id.to_string(),
+            datachannel,
         })
     }
 
@@ -194,7 +221,11 @@ impl GstreamerPipeline {
     /// - O receiver `shutdown_rx` recebe um sinal de shutdown
     /// - O GStreamer emite um evento de EOS (End of Stream)
     /// - Ocorre um erro irrecuperável no bus
-    pub fn run(&self, shutdown_rx: tokio::sync::oneshot::Receiver<()>) -> Result<()> {
+    pub fn run(
+        &self, 
+        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+        mut input_rx: tokio::sync::mpsc::Receiver<crate::input::InputReport>,
+    ) -> Result<()> {
         // Inicia o pipeline (PLAYING)
         self.pipeline
             .set_state(gstreamer::State::Playing)
@@ -224,11 +255,24 @@ impl GstreamerPipeline {
         let mut shutdown_rx = shutdown_rx;
 
         loop {
-            // Verifica se há um sinal de shutdown pendente
+            // Verifica se há um sinal de shutdown pendente ou novos inputs
             if rt.block_on(async {
                 tokio::select! {
                     biased;
                     _ = &mut shutdown_rx => true,
+                    report = input_rx.recv() => {
+                        if let Some(report) = report {
+                            if let Some(ref dc) = self.datachannel {
+                                // Serializa o report para bytes
+                                let bytes = report.to_bytes();
+                                // Envia os bytes pelo DataChannel
+                                // `send-data` espera um glib::Bytes
+                                let glib_bytes = gstreamer::glib::Bytes::from(&bytes);
+                                dc.emit_by_name::<()>("send-data", &[&glib_bytes]);
+                            }
+                        }
+                        false // Não encerra o loop
+                    },
                     else => false,
                 }
             }) {

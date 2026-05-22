@@ -7,6 +7,7 @@
 
 mod auth;
 mod signaling;
+mod input;
 #[cfg(feature = "streaming")]
 mod video;
 
@@ -267,6 +268,13 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
 
         let tmp_pipeline = gstreamer::Pipeline::new();
         tmp_pipeline.add(&webrtcbin).ok();
+
+        // 4.1. Solicita a criação do DataChannel "input" para que conste no SDP Offer
+        webrtcbin.emit_by_name::<Option<gstreamer::Object>>(
+            "create-data-channel",
+            &[&"input", &None::<gstreamer::Structure>],
+        );
+
         tmp_pipeline.set_state(gstreamer::State::Playing).ok();
 
         let sdp_offer = match tokio::time::timeout(std::time::Duration::from_secs(10), sdp_rx).await
@@ -310,7 +318,22 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
 
         println!("▶️  Iniciando pipeline de vídeo H.264 com aceleração de hardware...");
 
-        match video::start_pipeline(session).await {
+        // 7.1. Cria canais de comunicação de Input (Fase 4)
+        let (input_tx, input_rx) = tokio::sync::mpsc::channel::<crate::input::InputReport>(16);
+
+        // 7.2. Inicializa e inicia o InputManager
+        let (input_shutdown_tx, input_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        match crate::input::InputManager::new(input_tx) {
+            Ok(input_manager) => {
+                input_manager.start(input_shutdown_rx);
+                println!("🎮 Módulo de Input inicializado (Aguardando gamepad...)");
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ Não foi possível inicializar Input: {}", e);
+            }
+        }
+
+        match video::start_pipeline(session, input_rx).await {
             Ok(handle) => {
                 println!("✅ Pipeline em execução! Pressione Ctrl+C para encerrar.");
                 tokio::signal::ctrl_c()
@@ -319,6 +342,7 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
                 println!();
                 println!("🛑 Encerrando streaming...");
                 let _ = handle.shutdown_tx.send(());
+                let _ = input_shutdown_tx.send(()); // Desliga o gilrs também
             }
             Err(e) => {
                 eprintln!("❌ Falha ao iniciar pipeline GStreamer: {}", e);

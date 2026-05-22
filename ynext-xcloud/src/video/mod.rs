@@ -46,7 +46,10 @@ pub struct PipelineHandle {
 ///
 /// # Retorno
 /// Retorna um `PipelineHandle` que pode ser usado para encerrar o pipeline.
-pub async fn start_pipeline(session: StreamingSession) -> Result<PipelineHandle> {
+pub async fn start_pipeline(
+    session: StreamingSession,
+    input_rx: tokio::sync::mpsc::Receiver<crate::input::InputReport>,
+) -> Result<PipelineHandle> {
     // Inicializa o GStreamer (seguro chamar múltiplas vezes)
     gstreamer::init().context("Falha ao inicializar o GStreamer")?;
     info!("✅ GStreamer {} inicializado", gstreamer::version_string());
@@ -89,7 +92,7 @@ pub async fn start_pipeline(session: StreamingSession) -> Result<PipelineHandle>
                 }
 
                 // Inicia o pipeline e roda até shutdown ou erro
-                if let Err(e) = gst_pipeline.run(shutdown_rx) {
+                if let Err(e) = gst_pipeline.run(shutdown_rx, input_rx) {
                     error!("❌ Pipeline GStreamer encerrado com erro: {}", e);
                 } else {
                     info!("🛑 Pipeline GStreamer encerrado normalmente.");

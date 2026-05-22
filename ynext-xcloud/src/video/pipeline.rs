@@ -134,8 +134,8 @@ impl GstreamerPipeline {
                 None
             });
             // Opcional: on-error
-            dc.connect("on-error", false, |args| {
-                if let Some(err) = args[1].get::<gstreamer::glib::Error>().ok() {
+            dc.connect("on-error", false, |_args| {
+                if let Ok(err) = _args[1].get::<gstreamer::glib::Error>() {
                     error!("❌ Erro no DataChannel 'input': {}", err);
                 }
                 None
@@ -310,18 +310,17 @@ impl GstreamerPipeline {
                             "⚠️  Warning no pipeline GStreamer"
                         );
                     }
-                    MessageView::StateChanged(sc) => {
+                    MessageView::StateChanged(sc)
                         if msg
                             .src()
                             .map(|s| *s == *self.pipeline.upcast_ref::<gstreamer::Object>())
-                            .unwrap_or(false)
-                        {
-                            debug!(
-                                old = ?sc.old(),
-                                new = ?sc.current(),
-                                "Estado do pipeline alterado"
-                            );
-                        }
+                            .unwrap_or(false) =>
+                    {
+                        debug!(
+                            old = ?sc.old(),
+                            new = ?sc.current(),
+                            "Estado do pipeline alterado"
+                        );
                     }
                     _ => {}
                 }

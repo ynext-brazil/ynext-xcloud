@@ -24,7 +24,7 @@
 
 use anyhow::{bail, Context, Result};
 use gstreamer::prelude::*;
-use gstreamer_webrtc::{WebRTCSDPType, WebRTCSessFuncReturn};
+use gstreamer_webrtc::WebRTCSDPType;
 use tracing::{debug, error, info, warn};
 
 use crate::signaling::IceCandidate;
@@ -215,11 +215,11 @@ impl GstreamerPipeline {
         );
 
         // Aguarda o estado PLAYING com timeout
-        let (state_change, _, _) = self
+        let state_result = self
             .pipeline
             .state(gstreamer::ClockTime::from_seconds(PIPELINE_START_TIMEOUT_SECS));
 
-        if state_change == gstreamer::StateChangeReturn::Failure {
+        if state_result.0.is_err() {
             bail!("Pipeline falhou ao atingir estado PLAYING");
         }
 
@@ -276,7 +276,7 @@ impl GstreamerPipeline {
                         );
                     }
                     MessageView::StateChanged(sc) => {
-                        if msg.src().map(|s| s == self.pipeline).unwrap_or(false) {
+                        if msg.src().map(|s| *s == *self.pipeline.upcast_ref::<gstreamer::Object>()).unwrap_or(false) {
                             debug!(
                                 old = ?sc.old(),
                                 new = ?sc.current(),
@@ -309,7 +309,7 @@ fn connect_webrtc_pad(pipeline: &gstreamer::Pipeline, src_pad: &gstreamer::Pad) 
     // Obtém as caps do pad para verificar se é vídeo H.264
     let caps = src_pad
         .current_caps()
-        .or_else(|| src_pad.query_caps(None));
+        .or_else(|| Some(src_pad.query_caps(None)));
 
     let is_video = caps
         .as_ref()

@@ -58,7 +58,7 @@ pub async fn start_pipeline(session: StreamingSession) -> Result<PipelineHandle>
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     // Canal MPSC: sinalização → vídeo (SDP Answer + ICE Candidates)
-    let (video_tx, video_rx) = create_video_channel();
+    let (video_tx, mut video_rx) = create_video_channel();
 
     // Clona os dados da sessão para mover para a thread do GLib MainLoop
     let sdp_answer = session.sdp_answer.clone();
@@ -82,7 +82,7 @@ pub async fn start_pipeline(session: StreamingSession) -> Result<PipelineHandle>
         match GstreamerPipeline::new(&session_id) {
             Ok(mut gst_pipeline) => {
                 // Aguarda os dados de sinalização e configura o webrtcbin
-                if let Ok(msg) = rt.block_on(async { video_rx.recv().await }) {
+                if let Some(msg) = rt.block_on(async { video_rx.recv().await }) {
                     if let Err(e) = gst_pipeline.configure_webrtc(&msg.sdp_answer, &msg.ice_candidates) {
                         error!("❌ Falha ao configurar webrtcbin: {}", e);
                         return;

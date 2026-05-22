@@ -12,7 +12,7 @@ env:
 
 jobs:
   # ============================================================
-  # Build e Testes no Linux
+  # Build e Testes no Linux (com GStreamer — feature streaming)
   # ============================================================
   test-linux:
     name: 🐧 Linux (Ubuntu)
@@ -40,27 +40,22 @@ jobs:
             pkg-config \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev \
-            gstreamer1.0-plugins-bad \
-            gstreamer1.0-plugins-ugly \
-            gstreamer1.0-libav \
-            gstreamer1.0-vaapi \
-            gstreamer1.0-gl
+            libgstreamer-plugins-bad1.0-dev
 
       - name: ✅ Verificar formatação
         run: cargo fmt --manifest-path ynext-xcloud/Cargo.toml -- --check
 
       - name: 🔍 Clippy (lints de qualidade)
-        run: cargo clippy --manifest-path ynext-xcloud/Cargo.toml -- -D warnings
+        run: cargo clippy --manifest-path ynext-xcloud/Cargo.toml --features streaming -- -D warnings
 
       - name: 🧪 Rodar testes
-        run: cargo test --manifest-path ynext-xcloud/Cargo.toml
+        run: cargo test --manifest-path ynext-xcloud/Cargo.toml --features streaming
 
       - name: 🔨 Build release
-        run: cargo build --release --manifest-path ynext-xcloud/Cargo.toml
+        run: cargo build --release --manifest-path ynext-xcloud/Cargo.toml --features streaming
 
   # ============================================================
-  # Build no Windows
+  # Build no Windows (sem GStreamer — feature streaming futuramente)
   # ============================================================
   test-windows:
     name: 🪟 Windows
@@ -78,6 +73,9 @@ jobs:
         with:
           workspaces: "ynext-xcloud"
 
+      # Nota: GStreamer é opcional (feature "streaming").
+      # Windows compila sem ele por enquanto — suporte completo na Fase 6
+      # quando o GStreamer Windows SDK for integrado ao workflow.
       - name: 🧪 Rodar testes
         run: cargo test --manifest-path ynext-xcloud/Cargo.toml
 

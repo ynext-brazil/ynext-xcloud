@@ -7,6 +7,7 @@
 
 mod auth;
 mod signaling;
+#[cfg(feature = "streaming")]
 mod video;
 
 use anyhow::Result;
@@ -15,7 +16,7 @@ use tracing::{info, Level};
 
 use crate::auth::token_store::TokenStore;
 
-// Imports GStreamer (Fase 3 — Pipeline de Vídeo)
+#[cfg(feature = "streaming")]
 use gstreamer::prelude::*;
 
 
@@ -206,130 +207,125 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
     };
 
     println!("✅ Autenticação confirmada (Token XBL3.0)");
-    println!("⏳ Iniciando pipeline GStreamer e conectando ao xCloud...");
-    println!();
 
-    // 2. Inicializa o GStreamer para gerar o SDP Offer real via webrtcbin
-    gstreamer::init().map_err(|e| anyhow::anyhow!("Falha ao inicializar GStreamer: {}", e))?;
+    // 2-7. Pipeline GStreamer (apenas disponível com --features streaming)
+    #[cfg(feature = "streaming")]
+    {
+        println!("⏳ Iniciando pipeline GStreamer e conectando ao xCloud...");
+        println!();
 
-    // 3. Cria o elemento webrtcbin para gerar o SDP Offer real
-    //    Este SDP Offer será enviado para a API da Microsoft na Fase 2
-    let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
-        .name("sdp_generator")
-        .property_from_str("bundle-policy", "max-bundle")
-        .build()
-        .map_err(|e| anyhow::anyhow!(
-            "Falha ao criar webrtcbin para gerar SDP Offer. \
-             Instale gstreamer1.0-plugins-bad: {}", e
-        ))?;
+        // Inicializa o GStreamer para gerar o SDP Offer real via webrtcbin
+        gstreamer::init().map_err(|e| anyhow::anyhow!("Falha ao inicializar GStreamer: {}", e))?;
 
-    // 4. Canal one-shot para receber o SDP Offer gerado pelo webrtcbin
-    let (sdp_tx, sdp_rx) = tokio::sync::oneshot::channel::<String>();
-    let sdp_tx = std::sync::Arc::new(tokio::sync::Mutex::new(Some(sdp_tx)));
+        // Cria o elemento webrtcbin para gerar o SDP Offer real
+        let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
+            .name("sdp_generator")
+            .property_from_str("bundle-policy", "max-bundle")
+            .build()
+            .map_err(|e| anyhow::anyhow!(
+                "Falha ao criar webrtcbin. Instale gstreamer1.0-plugins-bad: {}", e
+            ))?;
 
-    // Conecta o sinal `on-negotiation-needed` para capturar o SDP Offer
-    let sdp_tx_clone = sdp_tx.clone();
-    webrtcbin.connect("on-negotiation-needed", false, move |args| {
-        let webrtc = &args[0].get::<gstreamer::Element>().unwrap();
-        let promise = gstreamer::Promise::with_change_func({
-            let sdp_tx = sdp_tx_clone.clone();
-            let webrtc = webrtc.clone();
-            move |reply| {
-                if let Ok(Some(s)) = reply {
-                    if let Ok(offer) = s.get::<gstreamer_webrtc::WebRTCSessionDescription>("offer") {
-                        let sdp_text = offer.sdp().as_text().unwrap_or_default();
-                        // Envia o SDP Offer para o canal
-                        let rt = tokio::runtime::Handle::try_current();
-                        if let Ok(rt) = rt {
-                            let sdp_tx = sdp_tx.clone();
-                            rt.spawn(async move {
-                                let mut guard = sdp_tx.lock().await;
-                                if let Some(tx) = guard.take() {
-                                    let _ = tx.send(sdp_text);
-                                }
-                            });
+        // Canal one-shot para capturar o SDP Offer gerado pelo webrtcbin
+        let (sdp_tx, sdp_rx) = tokio::sync::oneshot::channel::<String>();
+        let sdp_tx = std::sync::Arc::new(tokio::sync::Mutex::new(Some(sdp_tx)));
+
+        let sdp_tx_clone = sdp_tx.clone();
+        webrtcbin.connect("on-negotiation-needed", false, move |args| {
+            let webrtc = &args[0].get::<gstreamer::Element>().unwrap();
+            let promise = gstreamer::Promise::with_change_func({
+                let sdp_tx = sdp_tx_clone.clone();
+                let webrtc = webrtc.clone();
+                move |reply| {
+                    if let Ok(Some(s)) = reply {
+                        if let Ok(offer) = s.get::<gstreamer_webrtc::WebRTCSessionDescription>("offer") {
+                            let sdp_text = offer.sdp().as_text().unwrap_or_default();
+                            if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                                let sdp_tx = sdp_tx.clone();
+                                rt.spawn(async move {
+                                    let mut guard = sdp_tx.lock().await;
+                                    if let Some(tx) = guard.take() {
+                                        let _ = tx.send(sdp_text);
+                                    }
+                                });
+                            }
+                            webrtc.emit_by_name::<()>(
+                                "set-local-description",
+                                &[&offer, &None::<gstreamer::Promise>],
+                            );
                         }
-                        // Configura o SDP Offer como "local description"
-                        webrtc.emit_by_name::<()>(
-                            "set-local-description",
-                            &[&offer, &None::<gstreamer::Promise>],
-                        );
                     }
                 }
-            }
+            });
+            webrtc.emit_by_name::<()>("create-offer", &[&None::<gstreamer::Structure>, &promise]);
+            None
         });
-        webrtc.emit_by_name::<()>("create-offer", &[&None::<gstreamer::Structure>, &promise]);
-        None
-    });
 
-    // Inicia o webrtcbin para disparar `on-negotiation-needed`
-    let tmp_pipeline = gstreamer::Pipeline::new();
-    tmp_pipeline.add(&webrtcbin).ok();
-    tmp_pipeline.set_state(gstreamer::State::Playing).ok();
+        let tmp_pipeline = gstreamer::Pipeline::new();
+        tmp_pipeline.add(&webrtcbin).ok();
+        tmp_pipeline.set_state(gstreamer::State::Playing).ok();
 
-    // 5. Aguarda o SDP Offer gerado pelo GStreamer (timeout de 10s)
-    let sdp_offer = match tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        sdp_rx,
-    ).await {
-        Ok(Ok(sdp)) => {
-            println!("✅ SDP Offer gerado pelo webrtcbin ({} bytes)", sdp.len());
-            sdp
+        let sdp_offer = match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            sdp_rx,
+        ).await {
+            Ok(Ok(sdp)) => {
+                println!("✅ SDP Offer gerado pelo webrtcbin ({} bytes)", sdp.len());
+                sdp
+            }
+            _ => {
+                tracing::warn!("⚠️  Timeout ao gerar SDP — usando SDP mínimo de fallback");
+                "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n\
+                 m=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n".to_string()
+            }
+        };
+
+        tmp_pipeline.set_state(gstreamer::State::Null).ok();
+
+        let session = match crate::signaling::establish_session(&auth_header, &sdp_offer, vec![]).await {
+            Ok(s) => {
+                println!();
+                println!("╔══════════════════════════════════════════════════════════╗");
+                println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
+                println!("╠══════════════════════════════════════════════════════════╣");
+                println!("║  Session ID: {:<43} ║", &s.session_id);
+                println!("║  SDP Answer: {:<43} ║", format!("{} bytes", s.sdp_answer.len()));
+                println!("║  ICE Remotos: {:<42} ║", s.ice_candidates.len());
+                println!("╚══════════════════════════════════════════════════════════╝");
+                println!();
+                s
+            }
+            Err(e) => {
+                eprintln!("❌ Falha na sinalização WebRTC: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        println!("▶️  Iniciando pipeline de vídeo H.264 com aceleração de hardware...");
+
+        match video::start_pipeline(session).await {
+            Ok(handle) => {
+                println!("✅ Pipeline em execução! Pressione Ctrl+C para encerrar.");
+                tokio::signal::ctrl_c()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Falha ao registrar Ctrl+C: {}", e))?;
+                println!();
+                println!("🛑 Encerrando streaming...");
+                let _ = handle.shutdown_tx.send(());
+            }
+            Err(e) => {
+                eprintln!("❌ Falha ao iniciar pipeline GStreamer: {}", e);
+                eprintln!("💡 sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-vaapi");
+                std::process::exit(1);
+            }
         }
-        _ => {
-            // Fallback: usa um SDP H.264 mínimo válido para testes de sinalização
-            tracing::warn!("⚠️  Timeout ao gerar SDP via webrtcbin — usando SDP mínimo de fallback");
-            "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n\
-             m=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n".to_string()
-        }
-    };
+    }
 
-    tmp_pipeline.set_state(gstreamer::State::Null).ok();
-
-    // 6. Negociar sessão WebRTC com o xCloud (Fase 2)
-    let session = match crate::signaling::establish_session(&auth_header, &sdp_offer, vec![]).await {
-        Ok(s) => {
-            println!();
-            println!("╔══════════════════════════════════════════════════════════╗");
-            println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
-            println!("╠══════════════════════════════════════════════════════════╣");
-            println!("║  Session ID: {:<43} ║", &s.session_id);
-            println!("║  SDP Answer: {:<43} ║", format!("{} bytes", s.sdp_answer.len()));
-            println!("║  ICE Remotos: {:<42} ║", s.ice_candidates.len());
-            println!("╚══════════════════════════════════════════════════════════╝");
-            println!();
-            s
-        }
-        Err(e) => {
-            eprintln!("❌ Falha na sinalização WebRTC com o xCloud: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // 7. Iniciar pipeline GStreamer com a sessão estabelecida (Fase 3)
-    println!("▶️  Iniciando pipeline de vídeo H.264 com aceleração de hardware...");
-
-    match video::start_pipeline(session).await {
-        Ok(handle) => {
-            println!("✅ Pipeline em execução! Pressione Ctrl+C para encerrar.");
-
-            // Aguarda sinal de interrupção (Ctrl+C)
-            tokio::signal::ctrl_c()
-                .await
-                .map_err(|e| anyhow::anyhow!("Falha ao registrar handler Ctrl+C: {}", e))?;
-
-            println!();
-            println!("🛑 Encerrando streaming...");
-
-            // Envia sinal de shutdown para o pipeline
-            let _ = handle.shutdown_tx.send(());
-        }
-        Err(e) => {
-            eprintln!("❌ Falha ao iniciar pipeline GStreamer: {}", e);
-            eprintln!("💡 Certifique-se que os seguintes pacotes estão instalados:");
-            eprintln!("   sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-vaapi");
-            std::process::exit(1);
-        }
+    #[cfg(not(feature = "streaming"))]
+    {
+        println!("⚠️  Streaming não disponível nesta build.");
+        println!("   Compile com: cargo build --features streaming");
+        println!("   Requer: libgstreamer1.0-dev libgstreamer-plugins-bad1.0-dev");
     }
 
     Ok(())

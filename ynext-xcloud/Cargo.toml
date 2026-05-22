@@ -17,31 +17,40 @@ rust-version = "1.75"
 # ===========================================================================
 [profile.release]
 opt-level = 3
-lto = "thin"         # Link-Time Optimization — reduz binário e melhora perf
-codegen-units = 1    # Mais lento de compilar, mas binário mais otimizado
-strip = true         # Remove símbolos de debug do release
-panic = "abort"      # Menor binário, sem stack unwinding no release
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
 
 [profile.dev]
 opt-level = 0
 debug = true
 
 # ===========================================================================
-# Feature flags por plataforma
+# Feature flags
 # ===========================================================================
 [features]
 default = []
-# Ativa o sink OpenGL (Linux/macOS). Desativado no Windows (usa d3d11videosink)
-gl-sink = ["gstreamer-gl"]
+
+# Ativa o pipeline de streaming GStreamer completo (requer libs GStreamer no sistema)
+# Linux:   sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev
+# Windows: Instale o GStreamer runtime e SDK em https://gstreamer.freedesktop.org/
+streaming = [
+    "dep:gstreamer",
+    "dep:gstreamer-webrtc",
+    "dep:gstreamer-sdp",
+    "dep:gstreamer-video",
+]
+
+# Ativa o sink OpenGL Zero-Copy (requer streaming + libgstreamer-gl)
+gl-sink = ["streaming", "dep:gstreamer-gl"]
 
 # ===========================================================================
-# Dependências — Módulo 1: Autenticação
+# Dependências — Core (sem dependência de sistema além de TLS)
 # ===========================================================================
 [dependencies]
-# Async runtime
 tokio = { version = "1.38", features = ["full"] }
 
-# HTTP client com suporte a TLS nativo
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
@@ -51,70 +60,45 @@ reqwest = { version = "0.12", default-features = false, features = [
     "http2",
 ] }
 
-# Serialização/Deserialização
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# Erros idiomáticos
 thiserror = "1.0"
 anyhow = "1.0"
-
-# Logging e tracing estruturado
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
-
-# Geração de código aleatório (code_verifier para PKCE)
 rand = "0.8"
-
-# Base64 para PKCE
 base64 = "0.22"
-
-# SHA256 para PKCE code_challenge
 sha2 = "0.10"
-
-# Parsing de URLs
 url = { version = "2.5", features = ["serde"] }
-
-# Data/hora para expiração de tokens
 chrono = { version = "0.4", features = ["serde"] }
-
-# Configurações do usuário
 dirs = "5.0"
-
-# Interface de linha de comando
 clap = { version = "4.5", features = ["derive", "color", "unicode"] }
-
-# Parsing de configuração
 toml = "0.8"
-
-# UUID para session IDs
 uuid = { version = "1.9", features = ["v4", "serde"] }
 
 # ===========================================================================
-# Dependências — Módulo 3: Pipeline de Vídeo GStreamer (Zero-Copy)
+# Dependências — Feature "streaming" (GStreamer, opcional)
 # ===========================================================================
 
 # Core do GStreamer — wrapper Rust seguro sobre as libs C do GStreamer
-gstreamer = { version = "0.23", features = ["v1_22"] }
+gstreamer = { version = "0.23", features = ["v1_22"], optional = true }
 
-# Elemento webrtcbin — nucleio WebRTC (SDP/ICE + DTLS + SRTP)
+# Elemento webrtcbin — núcleo WebRTC (SDP/ICE + DTLS + SRTP)
 # É PROIBIDO usar webrtc-rs isolado; toda negociação ocorre aqui dentro
-gstreamer-webrtc = { version = "0.23" }
+gstreamer-webrtc = { version = "0.23", optional = true }
 
 # Parsing e manipulação de SDP
-gstreamer-sdp = { version = "0.23" }
+gstreamer-sdp = { version = "0.23", optional = true }
 
 # Tipos de vídeo (caps, formatos, dimensões)
-gstreamer-video = { version = "0.23" }
+gstreamer-video = { version = "0.23", optional = true }
 
-# Sink OpenGL — Zero-Copy de buffer de vídeo (feature opcional)
+# Sink OpenGL Zero-Copy via EGL DMA-BUF (feature gl-sink)
 gstreamer-gl = { version = "0.23", optional = true }
 
 [dev-dependencies]
-# Mocking de HTTP para testes
 mockito = "1.4"
 tokio-test = "0.4"
-# Diretórios temporários para testes do token store
 tempfile = "3.10"
 
 [[bin]]

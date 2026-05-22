@@ -19,7 +19,6 @@ use crate::auth::token_store::TokenStore;
 #[cfg(feature = "streaming")]
 use gstreamer::prelude::*;
 
-
 // ===========================================================================
 // CLI — Interface de Linha de Comando
 // ===========================================================================
@@ -222,9 +221,12 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
             .name("sdp_generator")
             .property_from_str("bundle-policy", "max-bundle")
             .build()
-            .map_err(|e| anyhow::anyhow!(
-                "Falha ao criar webrtcbin. Instale gstreamer1.0-plugins-bad: {}", e
-            ))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Falha ao criar webrtcbin. Instale gstreamer1.0-plugins-bad: {}",
+                    e
+                )
+            })?;
 
         // Canal one-shot para capturar o SDP Offer gerado pelo webrtcbin
         let (sdp_tx, sdp_rx) = tokio::sync::oneshot::channel::<String>();
@@ -238,7 +240,9 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
                 let webrtc = webrtc.clone();
                 move |reply| {
                     if let Ok(Some(s)) = reply {
-                        if let Ok(offer) = s.get::<gstreamer_webrtc::WebRTCSessionDescription>("offer") {
+                        if let Ok(offer) =
+                            s.get::<gstreamer_webrtc::WebRTCSessionDescription>("offer")
+                        {
                             let sdp_text = offer.sdp().as_text().unwrap_or_default();
                             if let Ok(rt) = tokio::runtime::Handle::try_current() {
                                 let sdp_tx = sdp_tx.clone();
@@ -265,10 +269,8 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
         tmp_pipeline.add(&webrtcbin).ok();
         tmp_pipeline.set_state(gstreamer::State::Playing).ok();
 
-        let sdp_offer = match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            sdp_rx,
-        ).await {
+        let sdp_offer = match tokio::time::timeout(std::time::Duration::from_secs(10), sdp_rx).await
+        {
             Ok(Ok(sdp)) => {
                 println!("✅ SDP Offer gerado pelo webrtcbin ({} bytes)", sdp.len());
                 sdp
@@ -276,30 +278,35 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
             _ => {
                 tracing::warn!("⚠️  Timeout ao gerar SDP — usando SDP mínimo de fallback");
                 "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n\
-                 m=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n".to_string()
+                 m=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 H264/90000\r\n"
+                    .to_string()
             }
         };
 
         tmp_pipeline.set_state(gstreamer::State::Null).ok();
 
-        let session = match crate::signaling::establish_session(&auth_header, &sdp_offer, vec![]).await {
-            Ok(s) => {
-                println!();
-                println!("╔══════════════════════════════════════════════════════════╗");
-                println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
-                println!("╠══════════════════════════════════════════════════════════╣");
-                println!("║  Session ID: {:<43} ║", &s.session_id);
-                println!("║  SDP Answer: {:<43} ║", format!("{} bytes", s.sdp_answer.len()));
-                println!("║  ICE Remotos: {:<42} ║", s.ice_candidates.len());
-                println!("╚══════════════════════════════════════════════════════════╝");
-                println!();
-                s
-            }
-            Err(e) => {
-                eprintln!("❌ Falha na sinalização WebRTC: {}", e);
-                std::process::exit(1);
-            }
-        };
+        let session =
+            match crate::signaling::establish_session(&auth_header, &sdp_offer, vec![]).await {
+                Ok(s) => {
+                    println!();
+                    println!("╔══════════════════════════════════════════════════════════╗");
+                    println!("║      🌐 SESSÃO WEBRTC ESTABELECIDA COM SUCESSO!          ║");
+                    println!("╠══════════════════════════════════════════════════════════╣");
+                    println!("║  Session ID: {:<43} ║", &s.session_id);
+                    println!(
+                        "║  SDP Answer: {:<43} ║",
+                        format!("{} bytes", s.sdp_answer.len())
+                    );
+                    println!("║  ICE Remotos: {:<42} ║", s.ice_candidates.len());
+                    println!("╚══════════════════════════════════════════════════════════╝");
+                    println!();
+                    s
+                }
+                Err(e) => {
+                    eprintln!("❌ Falha na sinalização WebRTC: {}", e);
+                    std::process::exit(1);
+                }
+            };
 
         println!("▶️  Iniciando pipeline de vídeo H.264 com aceleração de hardware...");
 
@@ -330,7 +337,6 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
 
     Ok(())
 }
-
 
 /// Handler para exibir informações da conta
 async fn handle_info_command() -> Result<()> {

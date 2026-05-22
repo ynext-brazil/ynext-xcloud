@@ -69,7 +69,9 @@ impl GstreamerPipeline {
             .property_from_str("bundle-policy", BUNDLE_POLICY)
             .property("latency", 0u32) // Latência mínima — crítico para gaming
             .build()
-            .context("Falha ao criar elemento 'webrtcbin'. Verifique se gst-plugins-bad está instalado.")?;
+            .context(
+                "Falha ao criar elemento 'webrtcbin'. Verifique se gst-plugins-bad está instalado.",
+            )?;
 
         pipeline
             .add(&webrtcbin)
@@ -142,10 +144,8 @@ impl GstreamerPipeline {
             .context("Falha ao parsear SDP Answer da Microsoft")?;
 
         // Cria o WebRTCSessionDescription como "answer" (resposta)
-        let answer = gstreamer_webrtc::WebRTCSessionDescription::new(
-            WebRTCSDPType::Answer,
-            sdp_msg,
-        );
+        let answer =
+            gstreamer_webrtc::WebRTCSessionDescription::new(WebRTCSDPType::Answer, sdp_msg);
 
         // Injeta o SDP Answer no webrtcbin como "remote description"
         // Esta chamada dispara a negociação ICE internamente
@@ -162,18 +162,12 @@ impl GstreamerPipeline {
 
         // Injeta os candidatos ICE remotos um a um
         for candidate in ice_candidates {
-            let sdp_mid = candidate
-                .sdp_mid
-                .as_deref()
-                .unwrap_or("video");
+            let sdp_mid = candidate.sdp_mid.as_deref().unwrap_or("video");
             let sdp_mline_index = candidate.sdp_m_line_index.unwrap_or(0);
 
             self.webrtcbin.emit_by_name::<()>(
                 "add-ice-candidate",
-                &[
-                    &sdp_mline_index,
-                    &candidate.candidate.as_str(),
-                ],
+                &[&sdp_mline_index, &candidate.candidate.as_str()],
             );
 
             debug!(
@@ -200,10 +194,7 @@ impl GstreamerPipeline {
     /// - O receiver `shutdown_rx` recebe um sinal de shutdown
     /// - O GStreamer emite um evento de EOS (End of Stream)
     /// - Ocorre um erro irrecuperável no bus
-    pub fn run(
-        &self,
-        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-    ) -> Result<()> {
+    pub fn run(&self, shutdown_rx: tokio::sync::oneshot::Receiver<()>) -> Result<()> {
         // Inicia o pipeline (PLAYING)
         self.pipeline
             .set_state(gstreamer::State::Playing)
@@ -215,9 +206,9 @@ impl GstreamerPipeline {
         );
 
         // Aguarda o estado PLAYING com timeout
-        let state_result = self
-            .pipeline
-            .state(gstreamer::ClockTime::from_seconds(PIPELINE_START_TIMEOUT_SECS));
+        let state_result = self.pipeline.state(gstreamer::ClockTime::from_seconds(
+            PIPELINE_START_TIMEOUT_SECS,
+        ));
 
         if state_result.0.is_err() {
             bail!("Pipeline falhou ao atingir estado PLAYING");
@@ -276,7 +267,11 @@ impl GstreamerPipeline {
                         );
                     }
                     MessageView::StateChanged(sc) => {
-                        if msg.src().map(|s| *s == *self.pipeline.upcast_ref::<gstreamer::Object>()).unwrap_or(false) {
+                        if msg
+                            .src()
+                            .map(|s| *s == *self.pipeline.upcast_ref::<gstreamer::Object>())
+                            .unwrap_or(false)
+                        {
                             debug!(
                                 old = ?sc.old(),
                                 new = ?sc.current(),
@@ -335,12 +330,10 @@ fn connect_webrtc_pad(pipeline: &gstreamer::Pipeline, src_pad: &gstreamer::Pad) 
         .context("Falha ao criar 'h264parse'. GStreamer base plugins ausente?")?;
 
     // Decoder H.264 por hardware (detecta a plataforma)
-    let decode = create_hw_decoder()
-        .context("Falha ao criar decoder H.264 por hardware")?;
+    let decode = create_hw_decoder().context("Falha ao criar decoder H.264 por hardware")?;
 
     // Sink de vídeo (OpenGL no Linux, D3D11 no Windows)
-    let sink = select_video_sink()
-        .context("Falha ao criar sink de vídeo")?;
+    let sink = select_video_sink().context("Falha ao criar sink de vídeo")?;
 
     // Adiciona todos os elementos ao pipeline
     pipeline
@@ -367,7 +360,9 @@ fn connect_webrtc_pad(pipeline: &gstreamer::Pipeline, src_pad: &gstreamer::Pad) 
         .link(&depay_sink)
         .context("Falha ao linkar pad webrtcbin → rtph264depay")?;
 
-    info!("✅ Cadeia de decode H.264 conectada: webrtcbin → rtph264depay → h264parse → hwdec → sink");
+    info!(
+        "✅ Cadeia de decode H.264 conectada: webrtcbin → rtph264depay → h264parse → hwdec → sink"
+    );
 
     Ok(())
 }

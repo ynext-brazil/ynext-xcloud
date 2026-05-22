@@ -49,10 +49,7 @@ pub struct PipelineHandle {
 pub async fn start_pipeline(session: StreamingSession) -> Result<PipelineHandle> {
     // Inicializa o GStreamer (seguro chamar múltiplas vezes)
     gstreamer::init().context("Falha ao inicializar o GStreamer")?;
-    info!(
-        "✅ GStreamer {} inicializado",
-        gstreamer::version_string()
-    );
+    info!("✅ GStreamer {} inicializado", gstreamer::version_string());
 
     // Canal de shutdown para encerrar o pipeline sob demanda
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -83,7 +80,9 @@ pub async fn start_pipeline(session: StreamingSession) -> Result<PipelineHandle>
             Ok(mut gst_pipeline) => {
                 // Aguarda os dados de sinalização e configura o webrtcbin
                 if let Some(msg) = rt.block_on(async { video_rx.recv().await }) {
-                    if let Err(e) = gst_pipeline.configure_webrtc(&msg.sdp_answer, &msg.ice_candidates) {
+                    if let Err(e) =
+                        gst_pipeline.configure_webrtc(&msg.sdp_answer, &msg.ice_candidates)
+                    {
                         error!("❌ Falha ao configurar webrtcbin: {}", e);
                         return;
                     }

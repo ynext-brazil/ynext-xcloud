@@ -40,6 +40,7 @@ streaming = [
     "dep:gstreamer-webrtc",
     "dep:gstreamer-sdp",
     "dep:gstreamer-video",
+    "dep:gstreamer-audio",
 ]
 
 # Ativa o sink OpenGL Zero-Copy (requer streaming + libgstreamer-gl)
@@ -99,6 +100,9 @@ gstreamer-video = { version = "0.23", optional = true }
 
 # Sink OpenGL Zero-Copy via EGL DMA-BUF (feature gl-sink)
 gstreamer-gl = { version = "0.23", optional = true }
+
+# Tipos e elemetos de áudio (Fase 5 — Opus pipeline)
+gstreamer-audio = { version = "0.23", optional = true }
 
 [dev-dependencies]
 mockito = "1.4"

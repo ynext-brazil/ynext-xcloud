@@ -5,6 +5,8 @@
 //! Cliente nativo open source para Xbox Cloud Gaming.
 //! Construído com Rust para altíssimo desempenho e mínimo consumo de recursos.
 
+#[cfg(feature = "streaming")]
+mod audio;
 mod auth;
 mod input;
 mod signaling;

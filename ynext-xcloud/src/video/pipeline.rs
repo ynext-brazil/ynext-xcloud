@@ -342,21 +342,37 @@ impl GstreamerPipeline {
 /// Conecta um pad recém-criado pelo webrtcbin ao resto do pipeline de decode.
 ///
 /// Esta função é chamada no sinal `pad-added` do webrtcbin e monta
-/// dinamicamente a cadeia: rtph264depay → h264parse → vaapih264dec → sink
+/// dinamicamente a cadeia correta conforme o tipo de mídia (vídeo ou áudio).
 fn connect_webrtc_pad(pipeline: &gstreamer::Pipeline, src_pad: &gstreamer::Pad) -> Result<()> {
-    // Obtém as caps do pad para verificar se é vídeo H.264
+    // Obtém as caps do pad para identificar o tipo de mídia
     let caps = src_pad
         .current_caps()
         .or_else(|| Some(src_pad.query_caps(None)));
 
-    let is_video = caps
+    let media_type = caps
         .as_ref()
         .and_then(|c| c.structure(0))
-        .map(|s| s.name().starts_with("application/x-rtp") || s.name().starts_with("video/"))
-        .unwrap_or(false);
+        .and_then(|s| s.get::<&str>("media").ok())
+        .unwrap_or("");
+
+    let name = caps
+        .as_ref()
+        .and_then(|c| c.structure(0))
+        .map(|s| s.name().as_str().to_string())
+        .unwrap_or_default();
+
+    // Áudio: encaminha para o módulo de áudio (Fase 5)
+    if media_type == "audio" || name.starts_with("audio/") {
+        return crate::audio::pipeline::connect_audio_pad(pipeline, src_pad);
+    }
+
+    // Vídeo: continua com a cadeia H.264 existente (Fase 3)
+    let is_video = media_type == "video"
+        || name.starts_with("application/x-rtp")
+        || name.starts_with("video/");
 
     if !is_video {
-        debug!("Pad ignorado (não é vídeo): {:?}", caps);
+        debug!("Pad ignorado (mídia desconhecida): {:?}", caps);
         return Ok(());
     }
 

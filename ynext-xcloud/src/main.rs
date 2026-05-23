@@ -10,6 +10,8 @@ mod audio;
 mod auth;
 mod input;
 mod signaling;
+#[cfg(feature = "ui")]
+mod ui;
 #[cfg(feature = "streaming")]
 mod video;
 
@@ -66,6 +68,8 @@ enum Commands {
     },
     /// Exibir informações da conta autenticada
     Info,
+    /// Abrir o launcher gráfico (requer feature `ui`)
+    Launch,
 }
 
 #[derive(Subcommand)]
@@ -99,6 +103,7 @@ async fn main() -> Result<()> {
         Commands::Auth { action } => handle_auth_command(action).await?,
         Commands::Stream { game } => handle_stream_command(game).await?,
         Commands::Info => handle_info_command().await?,
+        Commands::Launch => handle_launch_command().await?,
     }
 
     Ok(())
@@ -199,6 +204,7 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
     println!();
 
     // 1. Verificar autenticação e obter token XBL3.0
+    #[allow(unused_variables)]
     let auth_header = match auth::authenticate(&mut store).await {
         Ok(header) => header,
         Err(e) => {
@@ -430,4 +436,41 @@ fn setup_logging(level: &str) {
         .with_thread_ids(false)
         .compact()
         .init();
+}
+
+// ===========================================================================
+// Launcher gráfico (Fase 6)
+// ===========================================================================
+
+/// Handler do subcomando `launch` — abre o launcher gráfico egui
+async fn handle_launch_command() -> Result<()> {
+    #[cfg(feature = "ui")]
+    {
+        use crate::auth::token_store::TokenStore;
+
+        // Tenta obter o nome do usuário do token salvo
+        let store = TokenStore::new();
+        let username = store
+            .load_xsts_token()
+            .ok()
+            .flatten()
+            .map(|t| t.gamertag.unwrap_or_else(|| "Xbox User".to_string()))
+            .unwrap_or_else(|| "Xbox User".to_string());
+
+        info!("🖥️  Iniciando launcher gráfico para: {}", username);
+
+        // O egui precisa rodar na thread principal — obtemos o handle do runtime
+        let runtime = tokio::runtime::Handle::current();
+
+        // `run_launcher` é bloqueante (loop de eventos da janela)
+        crate::ui::run_launcher(username, runtime)?;
+    }
+
+    #[cfg(not(feature = "ui"))]
+    {
+        eprintln!("⚠️  O launcher gráfico não está compilado neste binário.");
+        eprintln!("   Recompile com: cargo build --features ui");
+    }
+
+    Ok(())
 }

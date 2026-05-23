@@ -1,0 +1,496 @@
+//! # App Principal do Launcher — XCloudApp
+//!
+//! Implementa `eframe::App`, o ponto central que orquestra
+//! toda a renderização da UI frame a frame.
+//!
+//! ## Estados de tela
+//!
+//! - `Home`: tela principal com as 5 seções de jogos
+//! - `SearchResults`: resultados filtrados pela query de busca
+//! - `GameDetail`: tela de detalhes de um jogo selecionado
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use egui::Context;
+
+use crate::ui::catalog::{Game, SIGL_ALL, SIGL_LEAVING, SIGL_NEW, SIGL_POPULAR};
+use crate::ui::widgets::CoverState;
+use crate::ui::{theme, widgets};
+
+// ---------------------------------------------------------------------------
+// Telas (estado de navegação)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Screen {
+    Home,
+    SearchResults,
+    GameDetail(String), // ID do jogo
+}
+
+// ---------------------------------------------------------------------------
+// Seções de jogos
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Section {
+    RecentlyPlayed,
+    NewlyAdded,
+    Popular,
+    Leaving,
+    AllGames,
+}
+
+impl Section {
+    pub fn title(&self) -> &str {
+        match self {
+            Section::RecentlyPlayed => "▶  Continuar jogando",
+            Section::NewlyAdded => "✨  Recém adicionados",
+            Section::Popular => "🔥  Mais populares na nuvem",
+            Section::Leaving => "⏳  Saindo em breve",
+            Section::AllGames => "🎮  Todos os jogos",
+        }
+    }
+
+    pub fn sigl_id(&self) -> Option<&str> {
+        match self {
+            Section::RecentlyPlayed => None, // requer XSTS token — tratado separado
+            Section::NewlyAdded => Some(SIGL_NEW),
+            Section::Popular => Some(SIGL_POPULAR),
+            Section::Leaving => Some(SIGL_LEAVING),
+            Section::AllGames => Some(SIGL_ALL),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Estado compartilhado entre threads (carregamento assíncrono)
+// ---------------------------------------------------------------------------
+
+/// Estado de carregamento de uma seção
+#[derive(Default)]
+pub struct SectionData {
+    pub games: Vec<Game>,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+/// Mapa compartilhado entre a thread de UI e as tasks de carregamento
+pub type SharedSections = Arc<Mutex<HashMap<String, SectionData>>>;
+
+// ---------------------------------------------------------------------------
+// App principal
+// ---------------------------------------------------------------------------
+
+pub struct XCloudApp {
+    /// Estado atual de navegação
+    screen: Screen,
+
+    /// Query da caixa de busca
+    search_query: String,
+
+    /// Nome do usuário logado (do XSTS token)
+    username: String,
+
+    /// Dados das seções (carregados assincronamente)
+    sections: SharedSections,
+
+    /// Cache de texturas de cover art: game_id → TextureHandle
+    covers: HashMap<String, CoverState>,
+
+    /// Ordem de exibição das seções
+    section_order: Vec<Section>,
+
+    /// Jogos filtrados pela busca (atualizado a cada frame com query)
+    search_results: Vec<Game>,
+
+    /// Runtime tokio para disparar tarefas de background
+    runtime: tokio::runtime::Handle,
+
+    /// Flag de carregamento inicial já disparado
+    initial_load_done: bool,
+}
+
+impl XCloudApp {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        username: String,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
+        // Aplica o tema Xbox
+        theme::apply(&cc.egui_ctx);
+
+        // Configura fonte customizada (sistema)
+        let fonts = egui::FontDefinitions::default();
+        // Tenta adicionar fonte do sistema para melhor renderização de emojis
+        cc.egui_ctx.set_fonts(fonts);
+
+        let sections: SharedSections = Arc::new(Mutex::new(HashMap::new()));
+
+        // Inicializa as seções com estado de "loading"
+        {
+            let mut map = sections.lock().unwrap();
+            for section in &[
+                Section::NewlyAdded,
+                Section::Popular,
+                Section::Leaving,
+                Section::AllGames,
+            ] {
+                map.insert(
+                    section.title().to_string(),
+                    SectionData {
+                        loading: true,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        Self {
+            screen: Screen::Home,
+            search_query: String::new(),
+            username,
+            sections,
+            covers: HashMap::new(),
+            section_order: vec![
+                Section::RecentlyPlayed,
+                Section::NewlyAdded,
+                Section::Popular,
+                Section::Leaving,
+                Section::AllGames,
+            ],
+            search_results: Vec::new(),
+            runtime,
+            initial_load_done: false,
+        }
+    }
+
+    /// Dispara o carregamento assíncrono das seções do catálogo
+    fn start_catalog_load(&mut self, ctx: Context) {
+        let sections_clone = Arc::clone(&self.sections);
+
+        self.runtime.spawn(async move {
+            let client = reqwest::Client::builder()
+                .user_agent("Mozilla/5.0 (compatible; YnextXcloud/0.1)")
+                .build()
+                .unwrap_or_default();
+
+            // Seções a carregar com seus SIGL IDs
+            let to_load = [
+                (Section::NewlyAdded, SIGL_NEW, 20usize),
+                (Section::Popular, SIGL_POPULAR, 20),
+                (Section::Leaving, SIGL_LEAVING, 20),
+                (Section::AllGames, SIGL_ALL, 100),
+            ];
+
+            for (section, sigl_id, max) in &to_load {
+                let result = crate::ui::catalog::fetch_section(&client, sigl_id, *max).await;
+
+                let mut map = sections_clone.lock().unwrap();
+                let entry = map.entry(section.title().to_string()).or_default();
+
+                match result {
+                    Ok(games) => {
+                        entry.games = games;
+                        entry.loading = false;
+                    }
+                    Err(e) => {
+                        entry.error = Some(e.to_string());
+                        entry.loading = false;
+                    }
+                }
+
+                // Solicita repintura ao egui para exibir os dados novos
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    /// Filtra jogos de todas as seções pela query de busca
+    fn update_search_results(&mut self) {
+        if self.search_query.is_empty() {
+            self.search_results.clear();
+            return;
+        }
+
+        let query = self.search_query.to_lowercase();
+        let map = self.sections.lock().unwrap();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        self.search_results = map
+            .values()
+            .flat_map(|section| section.games.iter().cloned())
+            .filter(|game| {
+                game.title.to_lowercase().contains(&query) && seen_ids.insert(game.id.clone())
+            })
+            .collect();
+
+        self.search_results.sort_by(|a, b| a.title.cmp(&b.title));
+    }
+}
+
+impl eframe::App for XCloudApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Dispara carregamento uma única vez no primeiro frame
+        if !self.initial_load_done {
+            self.start_catalog_load(ctx.clone());
+            self.initial_load_done = true;
+        }
+
+        // Painel principal com fundo escuro
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(theme::BG))
+            .show(ctx, |ui| {
+                // --- Top Bar ---
+                let prev_query = self.search_query.clone();
+                widgets::top_bar(ui, &mut self.search_query, &self.username);
+
+                // Atualiza resultados de busca se a query mudou
+                if self.search_query != prev_query {
+                    if self.search_query.is_empty() {
+                        self.screen = Screen::Home;
+                    } else {
+                        self.screen = Screen::SearchResults;
+                        self.update_search_results();
+                    }
+                }
+
+                // --- Conteúdo com scroll vertical ---
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.add_space(8.0);
+
+                        match &self.screen.clone() {
+                            Screen::Home => self.render_home(ui),
+                            Screen::SearchResults => self.render_search(ui),
+                            Screen::GameDetail(id) => self.render_game_detail(ui, &id.clone()),
+                        }
+
+                        ui.add_space(40.0);
+                    });
+            });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Renderização das telas
+// ---------------------------------------------------------------------------
+
+impl XCloudApp {
+    fn render_home(&mut self, ui: &mut egui::Ui) {
+        let sections_snap = {
+            let map = self.sections.lock().unwrap();
+            map.iter()
+                .map(|(k, v)| (k.clone(), v.games.clone(), v.loading, v.error.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        for section in &self.section_order {
+            // "Continuar jogando" ainda não tem dados do XSTS — exibe placeholder
+            if *section == Section::RecentlyPlayed {
+                ui.add_space(20.0);
+                ui.label(
+                    egui::RichText::new(section.title())
+                        .font(theme::section_title_font())
+                        .color(theme::TEXT_PRIMARY)
+                        .strong(),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Faça login e inicie uma sessão para ver seu histórico.")
+                        .color(theme::TEXT_SECONDARY),
+                );
+                continue;
+            }
+
+            let section_title = section.title().to_string();
+
+            if let Some((_, games, loading, error)) =
+                sections_snap.iter().find(|(k, ..)| *k == section_title)
+            {
+                ui.add_space(20.0);
+                ui.label(
+                    egui::RichText::new(section.title())
+                        .font(theme::section_title_font())
+                        .color(theme::TEXT_PRIMARY)
+                        .strong(),
+                );
+                ui.add_space(10.0);
+
+                if *loading {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(
+                            egui::RichText::new("Carregando jogos...").color(theme::TEXT_SECONDARY),
+                        );
+                    });
+                } else if let Some(err) = error {
+                    ui.label(egui::RichText::new(format!("⚠️  {}", err)).color(theme::DANGER));
+                } else {
+                    let is_leaving = *section == Section::Leaving;
+
+                    egui::ScrollArea::horizontal()
+                        .id_salt(&section_title)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = theme::CARD_GAP;
+                                for game in games.iter().take(if *section == Section::AllGames {
+                                    40
+                                } else {
+                                    20
+                                }) {
+                                    let cover =
+                                        self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
+
+                                    if widgets::game_card(ui, &game.title, cover, is_leaving) {
+                                        self.screen = Screen::GameDetail(game.id.clone());
+                                    }
+                                }
+                            });
+                        });
+                }
+            }
+        }
+    }
+
+    fn render_search(&mut self, ui: &mut egui::Ui) {
+        let results = self.search_results.clone();
+
+        if results.is_empty() {
+            ui.add_space(60.0);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("🔍")
+                        .font(egui::FontId::proportional(48.0))
+                        .color(theme::TEXT_SECONDARY),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Nenhum jogo encontrado para \"{}\"",
+                        self.search_query
+                    ))
+                    .color(theme::TEXT_SECONDARY),
+                );
+            });
+            return;
+        }
+
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "Resultados para \"{}\" — {} jogos",
+                self.search_query,
+                results.len()
+            ))
+            .font(theme::section_title_font())
+            .color(theme::TEXT_PRIMARY),
+        );
+        ui.add_space(12.0);
+
+        // Grade de resultados (wrap automático)
+        egui::Grid::new("search_results")
+            .spacing([theme::CARD_GAP, theme::CARD_GAP])
+            .show(ui, |ui| {
+                for (idx, game) in results.iter().enumerate() {
+                    let cover = self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
+
+                    if widgets::game_card(ui, &game.title, cover, false) {
+                        self.screen = Screen::GameDetail(game.id.clone());
+                    }
+
+                    // 5 cards por linha
+                    if (idx + 1) % 5 == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+    }
+
+    fn render_game_detail(&mut self, ui: &mut egui::Ui, game_id: &str) {
+        // Busca o jogo em qualquer seção
+        let game = {
+            let map = self.sections.lock().unwrap();
+            map.values()
+                .flat_map(|s| s.games.iter().cloned())
+                .find(|g| g.id == game_id)
+        };
+
+        if ui
+            .add(egui::Button::new(
+                egui::RichText::new("← Voltar").color(theme::ACCENT),
+            ))
+            .clicked()
+        {
+            self.screen = Screen::Home;
+        }
+
+        ui.add_space(20.0);
+
+        if let Some(game) = game {
+            ui.horizontal(|ui| {
+                // Cover art grande
+                let cover = self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
+                let cover_size = egui::Vec2::new(240.0, 320.0);
+                let (cover_rect, _) = ui.allocate_exact_size(cover_size, egui::Sense::hover());
+
+                let painter = ui.painter();
+                match cover {
+                    CoverState::Ready(texture) => {
+                        egui::Image::new(texture)
+                            .fit_to_exact_size(cover_size)
+                            .paint_at(ui, cover_rect);
+                    }
+                    _ => {
+                        painter.rect_filled(cover_rect, theme::CARD_ROUNDING, theme::SURFACE);
+                        painter.text(
+                            cover_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "🎮",
+                            egui::FontId::proportional(64.0),
+                            theme::TEXT_SECONDARY,
+                        );
+                    }
+                }
+
+                ui.add_space(24.0);
+
+                // Informações do jogo
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(&game.title)
+                            .font(egui::FontId::proportional(28.0))
+                            .color(theme::TEXT_PRIMARY)
+                            .strong(),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("☁️  Disponível via xCloud").color(theme::ACCENT));
+                    ui.add_space(24.0);
+
+                    // Botão de jogar
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("  ▶  Jogar na Nuvem  ")
+                                    .font(egui::FontId::proportional(16.0))
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            )
+                            .fill(theme::ACCENT)
+                            .rounding(theme::BUTTON_ROUNDING)
+                            .min_size(egui::Vec2::new(200.0, 48.0)),
+                        )
+                        .clicked()
+                    {
+                        // TODO: iniciar sessão de streaming para este jogo
+                        tracing::info!("🎮 Iniciando stream para: {} ({})", game.title, game.id);
+                    }
+                });
+            });
+        } else {
+            ui.label(egui::RichText::new("Jogo não encontrado.").color(theme::DANGER));
+        }
+    }
+}

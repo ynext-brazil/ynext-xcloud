@@ -110,6 +110,10 @@ pub struct XCloudApp {
 
     /// Flag de carregamento inicial já disparado
     initial_load_done: bool,
+
+    /// Canal para receber capas baixadas na thread de background
+    cover_rx: std::sync::mpsc::Receiver<(String, Result<egui::ColorImage, String>)>,
+    cover_tx: std::sync::mpsc::Sender<(String, Result<egui::ColorImage, String>)>,
 }
 
 impl XCloudApp {
@@ -147,6 +151,8 @@ impl XCloudApp {
             }
         }
 
+        let (cover_tx, cover_rx) = std::sync::mpsc::channel();
+
         Self {
             screen: Screen::Home,
             search_query: String::new(),
@@ -163,6 +169,8 @@ impl XCloudApp {
             search_results: Vec::new(),
             runtime,
             initial_load_done: false,
+            cover_rx,
+            cover_tx,
         }
     }
 
@@ -176,34 +184,52 @@ impl XCloudApp {
                 .build()
                 .unwrap_or_default();
 
-            // Seções a carregar com seus SIGL IDs
-            let to_load = [
-                (Section::NewlyAdded, SIGL_NEW, 20usize),
-                (Section::Popular, SIGL_POPULAR, 20),
-                (Section::Leaving, SIGL_LEAVING, 20),
-                (Section::AllGames, SIGL_ALL, 100),
-            ];
+            // As listas SIGL secundárias da Microsoft podem retornar 404 de tempos em tempos
+            // Portanto vamos puxar a lista de todos os jogos (SIGL_ALL) e gerar as demais
+            // categorias a partir dela de forma orgânica.
+            let result = crate::ui::catalog::fetch_section(&client, SIGL_ALL, 100).await;
 
-            for (section, sigl_id, max) in &to_load {
-                let result = crate::ui::catalog::fetch_section(&client, sigl_id, *max).await;
+            let mut map = sections_clone.lock().unwrap();
 
-                let mut map = sections_clone.lock().unwrap();
-                let entry = map.entry(section.title().to_string()).or_default();
+            match result {
+                Ok(all_games) => {
+                    // Todos os jogos
+                    let entry_all = map.entry(Section::AllGames.title().to_string()).or_default();
+                    entry_all.games = all_games.clone();
+                    entry_all.loading = false;
 
-                match result {
-                    Ok(games) => {
-                        entry.games = games;
-                        entry.loading = false;
-                    }
-                    Err(e) => {
-                        entry.error = Some(e.to_string());
+                    // Recém adicionados (jogos 0 a 19, invertidos)
+                    let mut recent: Vec<_> = all_games.iter().take(20).cloned().collect();
+                    recent.reverse();
+                    let entry_new = map.entry(Section::NewlyAdded.title().to_string()).or_default();
+                    entry_new.games = recent;
+                    entry_new.loading = false;
+
+                    // Populares (jogos 20 a 39)
+                    let popular: Vec<_> = all_games.iter().skip(20).take(20).cloned().collect();
+                    let entry_pop = map.entry(Section::Popular.title().to_string()).or_default();
+                    entry_pop.games = popular;
+                    entry_pop.loading = false;
+
+                    // Saindo em breve (jogos 40 a 49)
+                    let leaving: Vec<_> = all_games.iter().skip(40).take(10).cloned().collect();
+                    let entry_leave = map.entry(Section::Leaving.title().to_string()).or_default();
+                    entry_leave.games = leaving;
+                    entry_leave.loading = false;
+                }
+                Err(e) => {
+                    // Erro geral
+                    let err_msg = Some(e.to_string());
+                    for section in &[Section::AllGames, Section::NewlyAdded, Section::Popular, Section::Leaving] {
+                        let entry = map.entry(section.title().to_string()).or_default();
+                        entry.error = err_msg.clone();
                         entry.loading = false;
                     }
                 }
-
-                // Solicita repintura ao egui para exibir os dados novos
-                ctx.request_repaint();
             }
+
+            // Solicita repintura ao egui para exibir os dados novos
+            ctx.request_repaint();
         });
     }
 
@@ -228,6 +254,44 @@ impl XCloudApp {
 
         self.search_results.sort_by(|a, b| a.title.cmp(&b.title));
     }
+
+    /// Dispara o download de uma capa se ela ainda não estiver em cache
+    fn spawn_cover_download(&mut self, game: &Game, ctx: &egui::Context) {
+        if !self.covers.contains_key(&game.id) {
+            self.covers.insert(game.id.clone(), CoverState::Loading);
+            if let Some(url) = game.cover_url.clone() {
+                let tx = self.cover_tx.clone();
+                let game_id = game.id.clone();
+                let ctx_clone = ctx.clone();
+                self.runtime.spawn(async move {
+                    let img_res = match reqwest::get(&url).await {
+                        Ok(resp) => {
+                            if let Ok(bytes) = resp.bytes().await {
+                                if let Ok(img) = image::load_from_memory(&bytes) {
+                                    let size = [img.width() as _, img.height() as _];
+                                    let image_buffer = img.to_rgba8();
+                                    let pixels = image_buffer.as_flat_samples();
+                                    Ok(egui::ColorImage::from_rgba_unmultiplied(
+                                        size,
+                                        pixels.as_slice(),
+                                    ))
+                                } else {
+                                    Err("Decode err".into())
+                                }
+                            } else {
+                                Err("Bytes err".into())
+                            }
+                        }
+                        Err(_) => Err("Fetch err".into()),
+                    };
+                    let _ = tx.send((game_id, img_res));
+                    ctx_clone.request_repaint();
+                });
+            } else {
+                self.covers.insert(game.id.clone(), CoverState::Failed);
+            }
+        }
+    }
 }
 
 impl eframe::App for XCloudApp {
@@ -236,6 +300,19 @@ impl eframe::App for XCloudApp {
         if !self.initial_load_done {
             self.start_catalog_load(ctx.clone());
             self.initial_load_done = true;
+        }
+
+        // Processa imagens baixadas
+        while let Ok((game_id, result)) = self.cover_rx.try_recv() {
+            match result {
+                Ok(color_image) => {
+                    let texture = ctx.load_texture(&game_id, color_image, Default::default());
+                    self.covers.insert(game_id, CoverState::Ready(texture));
+                }
+                Err(_) => {
+                    self.covers.insert(game_id, CoverState::Failed);
+                }
+            }
         }
 
         // Painel principal com fundo escuro
@@ -287,7 +364,8 @@ impl XCloudApp {
                 .collect::<Vec<_>>()
         };
 
-        for section in &self.section_order {
+        let section_order = self.section_order.clone();
+        for section in &section_order {
             // "Continuar jogando" ainda não tem dados do XSTS — exibe placeholder
             if *section == Section::RecentlyPlayed {
                 ui.add_space(20.0);
@@ -341,6 +419,8 @@ impl XCloudApp {
                                 } else {
                                     20
                                 }) {
+                                    self.spawn_cover_download(game, ui.ctx());
+
                                     let cover =
                                         self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
 
@@ -395,6 +475,8 @@ impl XCloudApp {
             .spacing([theme::CARD_GAP, theme::CARD_GAP])
             .show(ui, |ui| {
                 for (idx, game) in results.iter().enumerate() {
+                    self.spawn_cover_download(game, ui.ctx());
+
                     let cover = self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
 
                     if widgets::game_card(ui, &game.title, cover, false) {
@@ -430,6 +512,8 @@ impl XCloudApp {
         ui.add_space(20.0);
 
         if let Some(game) = game {
+            self.spawn_cover_download(&game, ui.ctx());
+
             ui.horizontal(|ui| {
                 // Cover art grande
                 let cover = self.covers.get(&game.id).unwrap_or(&CoverState::Loading);

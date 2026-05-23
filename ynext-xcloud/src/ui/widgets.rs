@@ -126,8 +126,9 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
 
         // Título do jogo abaixo da cover
         let title_pos = egui::pos2(rect.min.x + 6.0, cover_rect.max.y + 6.0);
-        let title_display = if title.len() > 20 {
-            format!("{}…", &title[..19])
+        let title_display = if title.chars().count() > 20 {
+            let truncated: String = title.chars().take(19).collect();
+            format!("{}…", truncated)
         } else {
             title.to_string()
         };

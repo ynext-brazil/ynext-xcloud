@@ -215,8 +215,15 @@ pub async fn fetch_game_details(client: &reqwest::Client, ids: &[String]) -> Res
                     localized
                         .images
                         .iter()
-                        .find(|img| img.image_purpose == "Tile")
+                        .find(|img| img.image_purpose == "BrandedKeyArt")
                 })
+                .or_else(|| {
+                    localized
+                        .images
+                        .iter()
+                        .find(|img| img.image_purpose == "TitledHeroArt")
+                })
+                .or_else(|| localized.images.first())
                 .map(|img| {
                     // Garante HTTPS e pede resolução 160x213 (tamanho do card)
                     let uri = if img.uri.starts_with("//") {

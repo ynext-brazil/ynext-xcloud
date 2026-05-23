@@ -12,8 +12,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use egui::Context;
-
 use crate::ui::catalog::{Game, SIGL_ALL, SIGL_LEAVING, SIGL_NEW, SIGL_POPULAR};
 use crate::ui::widgets::CoverState;
 use crate::ui::{theme, widgets};
@@ -117,6 +115,9 @@ pub struct XCloudApp {
 
     /// Cliente HTTP (com User-Agent) para todas as requisições
     client: reqwest::Client,
+
+    /// Semáforo para limitar a concorrência no download das imagens
+    image_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl XCloudApp {
@@ -179,56 +180,60 @@ impl XCloudApp {
             cover_rx,
             cover_tx,
             client,
+            image_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(10)),
         }
     }
 
     /// Dispara o carregamento assíncrono das seções do catálogo
-    fn start_catalog_load(&mut self, ctx: Context) {
-        let sections_clone = Arc::clone(&self.sections);
+    fn start_catalog_load(&mut self, ctx: egui::Context) {
+        let sections_clone = std::sync::Arc::clone(&self.sections);
         let client = self.client.clone();
 
         self.runtime.spawn(async move {
-            // Puxa até 500 jogos para garantir o catálogo (quase) completo do xCloud
-            let result = crate::ui::catalog::fetch_section(&client, SIGL_ALL, 500).await;
+            use crate::ui::catalog::*;
+
+            // Como os IDs de SIGL individuais podem dar 404 dependendo da região,
+            // puxamos a lista mestre (SIGL_ALL) e fazemos a distribuição local.
+            let all_res = fetch_section(&client, SIGL_ALL, 500).await;
 
             let mut map = sections_clone.lock().unwrap();
 
-            match result {
-                Ok(all_games) => {
-                    // Todos os jogos
-                    let entry_all = map.entry(Section::AllGames.title().to_string()).or_default();
-                    entry_all.games = all_games.clone();
-                    entry_all.loading = false;
+            if let Ok(all_games) = all_res {
+                // Distribui os jogos de forma pseudo-aleatória pelas categorias
+                let len = all_games.len();
+                if len > 0 {
+                    // Recém adicionados (jogos finais da lista alfabética que geralmente são novos)
+                    let entry = map.entry(Section::NewlyAdded.title().to_string()).or_default();
+                    entry.games = all_games.iter().skip(len.saturating_sub(30)).cloned().collect();
+                    entry.games.reverse();
+                    entry.loading = false;
 
-                    // Recém adicionados (jogos 0 a 19, invertidos)
-                    let mut recent: Vec<_> = all_games.iter().take(20).cloned().collect();
-                    recent.reverse();
-                    let entry_new = map.entry(Section::NewlyAdded.title().to_string()).or_default();
-                    entry_new.games = recent;
-                    entry_new.loading = false;
-
-                    // Populares (jogos 20 a 39)
-                    let popular: Vec<_> = all_games.iter().skip(20).take(20).cloned().collect();
+                    // Populares (pula de 5 em 5)
                     let entry_pop = map.entry(Section::Popular.title().to_string()).or_default();
-                    entry_pop.games = popular;
+                    entry_pop.games = all_games.iter().step_by(5).take(30).cloned().collect();
                     entry_pop.loading = false;
 
-                    // Saindo em breve (jogos 40 a 49)
-                    let leaving: Vec<_> = all_games.iter().skip(40).take(10).cloned().collect();
+                    // Saindo em breve
                     let entry_leave = map.entry(Section::Leaving.title().to_string()).or_default();
-                    entry_leave.games = leaving;
+                    entry_leave.games = all_games.iter().step_by(17).take(10).cloned().collect();
                     entry_leave.loading = false;
+
+                    // Todos os jogos
+                    let entry_all = map.entry(Section::AllGames.title().to_string()).or_default();
+                    entry_all.games = all_games;
+                    entry_all.loading = false;
                 }
-                Err(e) => {
-                    // Erro geral
-                    let err_msg = Some(e.to_string());
-                    for section in &[Section::AllGames, Section::NewlyAdded, Section::Popular, Section::Leaving] {
-                        let entry = map.entry(section.title().to_string()).or_default();
-                        entry.error = err_msg.clone();
-                        entry.loading = false;
-                    }
+            } else {
+                for section in &[Section::AllGames, Section::NewlyAdded, Section::Popular, Section::Leaving] {
+                    let entry = map.entry(section.title().to_string()).or_default();
+                    entry.error = Some("Erro ao carregar catálogo".into());
+                    entry.loading = false;
                 }
             }
+
+            // Recém jogados ainda mockado
+            let entry_recent = map.entry(Section::RecentlyPlayed.title().to_string()).or_default();
+            entry_recent.loading = false;
 
             // Solicita repintura ao egui para exibir os dados novos
             ctx.request_repaint();
@@ -266,7 +271,12 @@ impl XCloudApp {
                 let game_id = game.id.clone();
                 let ctx_clone = ctx.clone();
                 let client = self.client.clone();
+                let semaphore = self.image_semaphore.clone();
+                
                 self.runtime.spawn(async move {
+                    // Limita concorrência para evitar 429 / 403 da Akamai
+                    let _permit = semaphore.acquire().await.unwrap();
+                    
                     let img_res = match client.get(&url).send().await {
                         Ok(resp) => {
                             if let Ok(bytes) = resp.bytes().await {
@@ -318,13 +328,18 @@ impl eframe::App for XCloudApp {
             }
         }
 
-        // Painel principal com fundo escuro
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::BG))
+        // Top Bar isolada para ocupar a largura toda
+        egui::TopBottomPanel::top("top_bar_panel")
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 20)))
             .show(ctx, |ui| {
-                // --- Top Bar ---
                 let prev_query = self.search_query.clone();
-                widgets::top_bar(ui, &mut self.search_query, &self.username);
+                
+                // Aplica margem interna apenas ao conteúdo da barra para alinhar com os cards
+                egui::Frame::none()
+                    .inner_margin(egui::Margin::symmetric(24.0, 0.0))
+                    .show(ui, |ui| {
+                        widgets::top_bar(ui, &mut self.search_query, &self.username);
+                    });
 
                 // Atualiza resultados de busca se a query mudou
                 if self.search_query != prev_query {
@@ -335,12 +350,19 @@ impl eframe::App for XCloudApp {
                         self.update_search_results();
                     }
                 }
+            });
+
+        // Painel principal com fundo escuro sem margem para não cortar as sombras na lateral
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(theme::BG))
+            .show(ctx, |ui| {
 
                 // --- Conteúdo com scroll vertical ---
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
-                        ui.add_space(8.0);
+                        ui.add_space(16.0);
 
                         match &self.screen.clone() {
                             Screen::Home => self.render_home(ui),
@@ -392,45 +414,54 @@ impl XCloudApp {
                 sections_snap.iter().find(|(k, ..)| *k == section_title)
             {
                 ui.add_space(20.0);
-                ui.label(
-                    egui::RichText::new(section.title())
-                        .font(theme::section_title_font())
-                        .color(theme::TEXT_PRIMARY)
-                        .strong(),
-                );
+                
+                // Título da seção com padding lateral
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(
+                        egui::RichText::new(section.title())
+                            .font(theme::section_title_font())
+                            .color(theme::TEXT_PRIMARY)
+                            .strong(),
+                    );
+                });
                 ui.add_space(10.0);
 
                 if *loading {
                     ui.horizontal(|ui| {
+                        ui.add_space(24.0);
                         ui.spinner();
                         ui.label(
                             egui::RichText::new("Carregando jogos...").color(theme::TEXT_SECONDARY),
                         );
                     });
                 } else if let Some(err) = error {
-                    ui.label(egui::RichText::new(format!("⚠️  {}", err)).color(theme::DANGER));
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.0);
+                        ui.label(egui::RichText::new(format!("⚠️  {}", err)).color(theme::DANGER));
+                    });
                 } else {
                     let is_leaving = *section == Section::Leaving;
 
                     egui::ScrollArea::horizontal()
                         .id_salt(&section_title)
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                ui.add_space(24.0);
                                 ui.spacing_mut().item_spacing.x = theme::CARD_GAP;
-                                for game in games.iter().take(if *section == Section::AllGames {
-                                    40
-                                } else {
-                                    20
-                                }) {
+                                
+                                let limit = if *section == Section::AllGames { 40 } else { 20 };
+                                for game in games.iter().take(limit) {
                                     self.spawn_cover_download(game, ui.ctx());
 
-                                    let cover =
-                                        self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
+                                    let cover = self.covers.get(&game.id).unwrap_or(&CoverState::Loading);
 
                                     if widgets::game_card(ui, &game.title, cover, is_leaving) {
                                         self.screen = Screen::GameDetail(game.id.clone());
                                     }
                                 }
+                                ui.add_space(24.0);
                             });
                         });
                 }

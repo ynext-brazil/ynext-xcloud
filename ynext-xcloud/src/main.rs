@@ -474,3 +474,4 @@ async fn handle_launch_command() -> Result<()> {
 
     Ok(())
 }
+

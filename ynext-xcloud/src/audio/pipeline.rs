@@ -98,7 +98,6 @@ pub fn connect_audio_pad(pipeline: &gstreamer::Pipeline, src_pad: &gstreamer::Pa
 #[cfg(test)]
 mod tests {
 
-
     #[test]
     fn test_select_audio_sink() {
         gstreamer::init().expect("GStreamer deve inicializar");

@@ -176,7 +176,6 @@ fn build_http_client() -> Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
 
-
     #[test]
     fn test_rps_ticket_format() {
         // Garante que o formato "d=<token>" está correto

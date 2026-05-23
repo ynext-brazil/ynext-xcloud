@@ -175,7 +175,7 @@ fn build_http_client() -> Result<reqwest::Client> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
 
     #[test]
     fn test_rps_ticket_format() {

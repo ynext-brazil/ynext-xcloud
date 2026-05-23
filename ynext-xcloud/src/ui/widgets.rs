@@ -36,47 +36,63 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
         let hovered = response.hovered();
         let painter = ui.painter();
 
-        // Fundo do card — muda sutilmente ao hover
+        let hover_t = ui.ctx().animate_bool_with_time(response.id.with("hover"), hovered, 0.15);
+
+        // Animação de glow e crescimento
+        let expand_amount = hover_t * 4.0;
+        let draw_rect = rect.expand(expand_amount);
+
+        // Sombra de foco (Glow Xbox Verde)
+        if hover_t > 0.0 {
+            painter.rect_stroke(
+                draw_rect.expand(2.0),
+                Rounding::same(8.0 + 2.0),
+                egui::Stroke::new(2.0 * hover_t, theme::ACCENT.linear_multiply(hover_t * 0.8)),
+            );
+        }
+
+        // Fundo do card
         let bg_color = if hovered {
             theme::SURFACE_HOVER
         } else {
             theme::SURFACE
         };
-        painter.rect_filled(rect, theme::CARD_ROUNDING, bg_color);
+        painter.rect_filled(draw_rect, theme::CARD_ROUNDING, bg_color);
 
-        // Borda verde ao hover
+        // Borda verde fina permanente ao hover
         if hovered {
             painter.rect_stroke(
-                rect,
+                draw_rect,
                 theme::CARD_ROUNDING,
                 egui::Stroke::new(1.5, theme::ACCENT),
             );
         }
 
-        // Área da cover art
+        // Área da cover art (proporcional ao draw_rect expandido)
+        let cover_height = theme::CARD_COVER_HEIGHT + (expand_amount * 2.0 * (theme::CARD_COVER_HEIGHT / theme::CARD_HEIGHT));
         let cover_rect = Rect::from_min_size(
-            rect.min,
-            Vec2::new(theme::CARD_WIDTH, theme::CARD_COVER_HEIGHT),
+            draw_rect.min,
+            Vec2::new(draw_rect.width(), cover_height),
         );
+
+        let cover_rounding = Rounding {
+            nw: 8.0,
+            ne: 8.0,
+            sw: 0.0,
+            se: 0.0,
+        };
 
         match cover {
             CoverState::Ready(texture) => {
-                // Exibe a imagem carregada
-                let image = Image::new(texture).fit_to_exact_size(cover_rect.size());
+                // Exibe a imagem carregada com cantos arredondados
+                let image = Image::new(texture)
+                    .fit_to_exact_size(cover_rect.size())
+                    .rounding(cover_rounding);
                 image.paint_at(ui, cover_rect);
             }
             CoverState::Loading => {
                 // Placeholder: fundo verde Xbox com "..." animado
-                painter.rect_filled(
-                    cover_rect,
-                    Rounding {
-                        nw: 8.0,
-                        ne: 8.0,
-                        sw: 0.0,
-                        se: 0.0,
-                    },
-                    theme::ACCENT,
-                );
+                painter.rect_filled(cover_rect, cover_rounding, theme::ACCENT);
                 painter.text(
                     cover_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -87,16 +103,7 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
             }
             CoverState::Failed => {
                 // Placeholder: fundo cinza escuro com ícone de jogo
-                painter.rect_filled(
-                    cover_rect,
-                    Rounding {
-                        nw: 8.0,
-                        ne: 8.0,
-                        sw: 0.0,
-                        se: 0.0,
-                    },
-                    theme::SURFACE_HOVER,
-                );
+                painter.rect_filled(cover_rect, cover_rounding, theme::SURFACE_HOVER);
                 painter.text(
                     cover_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -125,9 +132,9 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
         }
 
         // Título do jogo abaixo da cover
-        let title_pos = egui::pos2(rect.min.x + 6.0, cover_rect.max.y + 6.0);
-        let title_display = if title.chars().count() > 20 {
-            let truncated: String = title.chars().take(19).collect();
+        let title_pos = egui::pos2(draw_rect.min.x + 8.0, cover_rect.max.y + 12.0);
+        let title_display = if title.chars().count() > 18 {
+            let truncated: String = title.chars().take(17).collect();
             format!("{}…", truncated)
         } else {
             title.to_string()

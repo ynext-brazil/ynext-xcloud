@@ -114,6 +114,9 @@ pub struct XCloudApp {
     /// Canal para receber capas baixadas na thread de background
     cover_rx: std::sync::mpsc::Receiver<(String, Result<egui::ColorImage, String>)>,
     cover_tx: std::sync::mpsc::Sender<(String, Result<egui::ColorImage, String>)>,
+
+    /// Cliente HTTP (com User-Agent) para todas as requisições
+    client: reqwest::Client,
 }
 
 impl XCloudApp {
@@ -152,6 +155,10 @@ impl XCloudApp {
         }
 
         let (cover_tx, cover_rx) = std::sync::mpsc::channel();
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .build()
+            .unwrap_or_default();
 
         Self {
             screen: Screen::Home,
@@ -171,23 +178,18 @@ impl XCloudApp {
             initial_load_done: false,
             cover_rx,
             cover_tx,
+            client,
         }
     }
 
     /// Dispara o carregamento assíncrono das seções do catálogo
     fn start_catalog_load(&mut self, ctx: Context) {
         let sections_clone = Arc::clone(&self.sections);
+        let client = self.client.clone();
 
         self.runtime.spawn(async move {
-            let client = reqwest::Client::builder()
-                .user_agent("Mozilla/5.0 (compatible; YnextXcloud/0.1)")
-                .build()
-                .unwrap_or_default();
-
-            // As listas SIGL secundárias da Microsoft podem retornar 404 de tempos em tempos
-            // Portanto vamos puxar a lista de todos os jogos (SIGL_ALL) e gerar as demais
-            // categorias a partir dela de forma orgânica.
-            let result = crate::ui::catalog::fetch_section(&client, SIGL_ALL, 100).await;
+            // Puxa até 500 jogos para garantir o catálogo (quase) completo do xCloud
+            let result = crate::ui::catalog::fetch_section(&client, SIGL_ALL, 500).await;
 
             let mut map = sections_clone.lock().unwrap();
 
@@ -263,8 +265,9 @@ impl XCloudApp {
                 let tx = self.cover_tx.clone();
                 let game_id = game.id.clone();
                 let ctx_clone = ctx.clone();
+                let client = self.client.clone();
                 self.runtime.spawn(async move {
-                    let img_res = match reqwest::get(&url).await {
+                    let img_res = match client.get(&url).send().await {
                         Ok(resp) => {
                             if let Ok(bytes) = resp.bytes().await {
                                 if let Ok(img) = image::load_from_memory(&bytes) {

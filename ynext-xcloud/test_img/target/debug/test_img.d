@@ -1,0 +1,1 @@
+/home/ytalo/Documentos/Ynext\ -\ Agência\ de\ Automação/Ynext-Xcloud/ynext-xcloud/test_img/target/debug/test_img: /home/ytalo/Documentos/Ynext\ -\ Agência\ de\ Automação/Ynext-Xcloud/ynext-xcloud/test_img/src/main.rs

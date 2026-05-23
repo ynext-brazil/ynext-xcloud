@@ -50,6 +50,9 @@ pub struct Game {
 
     /// Disponível via xCloud (cloud gaming)
     pub cloud_available: bool,
+
+    /// Data de lançamento (para ordenar recém-adicionados)
+    pub release_date: Option<String>,
 }
 
 /// Resposta da API SIGL com lista de IDs de jogos
@@ -82,6 +85,15 @@ struct CatalogProduct {
 
     #[serde(rename = "Properties")]
     properties: Option<ProductProperties>,
+
+    #[serde(rename = "MarketProperties")]
+    market_properties: Option<Vec<MarketProperty>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MarketProperty {
+    #[serde(rename = "OriginalReleaseDate")]
+    original_release_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,8 +243,13 @@ pub async fn fetch_game_details(client: &reqwest::Client, ids: &[String]) -> Res
                     } else {
                         img.uri.clone()
                     };
-                    format!("{}&w=320&h=426&q=80", uri)
+                    format!("{}?w=320&h=426&q=80", uri)
                 });
+
+            let release_date = product
+                .market_properties
+                .and_then(|props| props.into_iter().next())
+                .and_then(|p| p.original_release_date);
 
             Some(Game {
                 id: product.product_id,
@@ -240,6 +257,7 @@ pub async fn fetch_game_details(client: &reqwest::Client, ids: &[String]) -> Res
                 cover_url,
                 platforms: vec!["Cloud".to_string()],
                 cloud_available: true,
+                release_date,
             })
         })
         .collect();

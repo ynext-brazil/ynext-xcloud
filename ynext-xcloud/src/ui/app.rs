@@ -198,28 +198,38 @@ impl XCloudApp {
 
             let mut map = sections_clone.lock().unwrap();
 
-            if let Ok(all_games) = all_res {
-                // Distribui os jogos de forma pseudo-aleatória pelas categorias
+            if let Ok(mut all_games) = all_res {
                 let len = all_games.len();
                 if len > 0 {
-                    // Recém adicionados (jogos finais da lista alfabética que geralmente são novos)
+                    // Recém adicionados: Ordenar por release_date (mais recente primeiro)
+                    let mut novos = all_games.clone();
+                    novos.sort_by(|a, b| {
+                        b.release_date
+                            .as_ref()
+                            .unwrap_or(&"".to_string())
+                            .cmp(a.release_date.as_ref().unwrap_or(&"".to_string()))
+                    });
+                    
                     let entry = map.entry(Section::NewlyAdded.title().to_string()).or_default();
-                    entry.games = all_games.iter().skip(len.saturating_sub(30)).cloned().collect();
-                    entry.games.reverse();
+                    entry.games = novos.into_iter().take(40).collect();
                     entry.loading = false;
 
-                    // Populares (pula de 5 em 5)
+                    // Populares: Os primeiros itens de SIGL_ALL costumam ser bem populares
+                    // A lista mestre já vem com certa curadoria.
                     let entry_pop = map.entry(Section::Popular.title().to_string()).or_default();
-                    entry_pop.games = all_games.iter().step_by(5).take(30).cloned().collect();
+                    entry_pop.games = all_games.iter().take(40).cloned().collect();
                     entry_pop.loading = false;
 
-                    // Saindo em breve
+                    // Saindo em breve: Embaralhar os últimos jogos
                     let entry_leave = map.entry(Section::Leaving.title().to_string()).or_default();
-                    entry_leave.games = all_games.iter().step_by(17).take(10).cloned().collect();
+                    let mut leaving: Vec<_> = all_games.iter().skip(len.saturating_sub(60)).take(20).cloned().collect();
+                    leaving.reverse();
+                    entry_leave.games = leaving;
                     entry_leave.loading = false;
 
-                    // Todos os jogos
+                    // Todos os jogos (ordem alfabética original)
                     let entry_all = map.entry(Section::AllGames.title().to_string()).or_default();
+                    all_games.sort_by(|a, b| a.title.cmp(&b.title));
                     entry_all.games = all_games;
                     entry_all.loading = false;
                 }
@@ -289,13 +299,18 @@ impl XCloudApp {
                                         pixels.as_slice(),
                                     ))
                                 } else {
+                                    eprintln!("Decode error for: {}", url);
                                     Err("Decode err".into())
                                 }
                             } else {
+                                eprintln!("Bytes error for: {}", url);
                                 Err("Bytes err".into())
                             }
                         }
-                        Err(_) => Err("Fetch err".into()),
+                        Err(e) => {
+                            eprintln!("Request error for {}: {:?}", url, e);
+                            Err("Fetch err".into())
+                        }
                     };
                     let _ = tx.send((game_id, img_res));
                     ctx_clone.request_repaint();
@@ -394,17 +409,23 @@ impl XCloudApp {
             // "Continuar jogando" ainda não tem dados do XSTS — exibe placeholder
             if *section == Section::RecentlyPlayed {
                 ui.add_space(20.0);
-                ui.label(
-                    egui::RichText::new(section.title())
-                        .font(theme::section_title_font())
-                        .color(theme::TEXT_PRIMARY)
-                        .strong(),
-                );
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(
+                        egui::RichText::new(section.title())
+                            .font(theme::section_title_font())
+                            .color(theme::TEXT_PRIMARY)
+                            .strong(),
+                    );
+                });
                 ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("Faça login e inicie uma sessão para ver seu histórico.")
-                        .color(theme::TEXT_SECONDARY),
-                );
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(
+                        egui::RichText::new("Faça login e inicie uma sessão para ver seu histórico.")
+                            .color(theme::TEXT_SECONDARY),
+                    );
+                });
                 continue;
             }
 

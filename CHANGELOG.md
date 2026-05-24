@@ -8,6 +8,12 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Unreleased]
 
 ### Adicionado
+- **Fase 4 (Interface Gráfica Nativa em egui):** Reescrita profunda do layout para replicar a UI original do Xbox Cloud Gaming.
+  - Implementação do motor dinâmico `CardStyle` suportando as proporções `Tall` (Pôster), `Wide` (Banner/Hero) e `Square` (Quadrada).
+  - Algoritmo matemático de Recorte UV (semelhante ao `object-fit: cover`) para encaixe de texturas sem distorção.
+  - Grade responsiva infinita ("Todos os jogos") com suporte a wrap automático e rolagem fluida.
+  - Gerenciador de download de capas asíncrono via `reqwest` com sistema de cache thread-safe (`Mutex<HashMap>`) para evitar Memory Leaks ou Rate Limits.
+  - Mapeamento avançado do catálogo `SIGL_ALL` suportando renderização de +2.800 títulos simultâneos, preparando suporte ao "Transmita o Seu".
 - **Fase 3 (Pipeline de Vídeo H.264 Zero-Copy):** Integração completa do pipeline GStreamer.
   - `src/video/mod.rs`: Orquestrador do pipeline — inicializa GStreamer e gerencia o ciclo de vida.
   - `src/video/pipeline.rs`: Montagem do pipeline `webrtcbin → rtph264depay → h264parse → vaapih264dec/d3d11h264dec → glimagesink`.

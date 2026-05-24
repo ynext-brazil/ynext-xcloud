@@ -6,15 +6,32 @@
 //! - `top_bar`: barra superior com logo, busca e perfil
 //! - `search_bar`: campo de busca in-line
 
-use egui::{Align, Color32, Image, Layout, Rect, RichText, Rounding, Sense, Ui, Vec2};
+use egui::{Align, Align2, Color32, Image, Layout, Rect, RichText, Rounding, Sense, Ui, Vec2, pos2};
 
 use crate::ui::theme;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CardStyle {
+    Tall,
+    Wide,
+    Square,
+}
+
+impl CardStyle {
+    pub fn size(&self) -> Vec2 {
+        match self {
+            CardStyle::Tall => Vec2::new(160.0, 213.0),
+            CardStyle::Wide => Vec2::new(284.0, 160.0),
+            CardStyle::Square => Vec2::new(160.0, 160.0),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // GameCard
 // ---------------------------------------------------------------------------
 
-/// Estado de carregamento da cover art
+#[derive(Clone)]
 pub enum CoverState {
     /// Ainda baixando — exibe placeholder verde
     Loading,
@@ -27,9 +44,8 @@ pub enum CoverState {
 /// Renderiza um card de jogo (cover art + título + hover animado).
 ///
 /// Retorna `true` se o usuário clicou no card.
-pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool) -> bool {
-    let card_size = Vec2::new(theme::CARD_WIDTH, theme::CARD_HEIGHT);
-
+pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, style: CardStyle, is_leaving: bool, leaving_date: Option<&String>) -> bool {
+    let card_size = style.size();
     let (rect, response) = ui.allocate_exact_size(card_size, Sense::click());
 
     if ui.is_rect_visible(rect) {
@@ -84,8 +100,8 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
 
         match cover {
             CoverState::Ready(texture) => {
-                // Exibe a imagem carregada com cantos arredondados
                 let image = Image::new(texture)
+                    .maintain_aspect_ratio(true) // no xcloud, wide e tall já são pre-cortados e encaixam
                     .fit_to_exact_size(cover_rect.size())
                     .rounding(cover_rounding);
                 image.paint_at(ui, cover_rect);
@@ -116,17 +132,29 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
 
         // Badge "Saindo em breve" (canto superior direito)
         if is_leaving {
-            let badge_text = "Saindo";
-            let badge_rect = Rect::from_min_size(
-                egui::pos2(cover_rect.max.x - 56.0, cover_rect.min.y + 6.0),
-                Vec2::new(50.0, 18.0),
+            let badge_text = if let Some(date) = leaving_date {
+                // Pegar apenas "YYYY-MM-DD" da string do xbox
+                let short_date = date.split('T').next().unwrap_or(date);
+                format!("Saindo ({})", short_date)
+            } else {
+                "Saindo em breve".to_string()
+            };
+            
+            // Desenha a tarja no fundo do `cover_rect` (para crescer no hover também)
+            let badge_rect = Rect::from_min_max(
+                pos2(cover_rect.min.x, cover_rect.max.y - 20.0),
+                pos2(cover_rect.max.x, cover_rect.max.y),
             );
-            painter.rect_filled(badge_rect, Rounding::same(4.0), theme::DANGER);
+            painter.rect_filled(
+                badge_rect,
+                Rounding { nw: 0.0, ne: 0.0, sw: cover_rounding.sw, se: cover_rounding.se },
+                Color32::from_rgb(220, 53, 69).linear_multiply(0.9), // Vermelho intenso levemente translúcido
+            );
             painter.text(
                 badge_rect.center(),
-                egui::Align2::CENTER_CENTER,
+                Align2::CENTER_CENTER,
                 badge_text,
-                theme::badge_font(),
+                egui::FontId::proportional(12.0),
                 Color32::WHITE,
             );
         }
@@ -153,68 +181,6 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, is_leaving: bool)
     }
 
     response.clicked()
-}
-
-// ---------------------------------------------------------------------------
-// Linha de seção horizontal (título + scroll horizontal de cards)
-// ---------------------------------------------------------------------------
-
-/// Renderiza uma seção com título e uma fileira horizontal de cards roláveis.
-///
-/// Retorna o índice do card clicado (se algum foi).
-pub fn section_row<'a>(
-    ui: &mut Ui,
-    title: &str,
-    games: impl Iterator<Item = (&'a str, &'a CoverState, bool)>,
-    is_leaving_section: bool,
-) -> Option<usize> {
-    let mut clicked = None;
-
-    ui.add_space(20.0);
-
-    // Cabeçalho da seção
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(title)
-                .font(theme::section_title_font())
-                .color(theme::TEXT_PRIMARY)
-                .strong(),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .add(
-                    egui::Label::new(
-                        RichText::new("ver todos >")
-                            .font(theme::link_font())
-                            .color(theme::ACCENT),
-                    )
-                    .sense(Sense::click()),
-                )
-                .clicked()
-            {
-                // TODO: navegar para lista completa
-            }
-        });
-    });
-
-    ui.add_space(10.0);
-
-    // Scroll horizontal dos cards
-    egui::ScrollArea::horizontal()
-        .id_salt(title)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = theme::CARD_GAP;
-                for (idx, (game_title, cover, _)) in games.enumerate() {
-                    let is_leaving = is_leaving_section;
-                    if game_card(ui, game_title, cover, is_leaving) {
-                        clicked = Some(idx);
-                    }
-                }
-            });
-        });
-
-    clicked
 }
 
 // ---------------------------------------------------------------------------

@@ -14,20 +14,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
-// IDs das listas SIGL da Microsoft (inspecionados do xcloud.xbox.com)
+// Identificadores (SIGL) do Catálogo (Xbox Cloud Gaming)
+// Extraídos da página oficial pt-BR/play
 // ---------------------------------------------------------------------------
 
 /// Jogos recém adicionados ao Game Pass / xCloud
-pub const SIGL_NEW: &str = "f13cf6b4-57e6-4459-89df-dc8b1ce5b9cb";
+pub const SIGL_NEW: &str = "06323672-b8c8-43cc-b0de-32d5a9834749";
 
 /// Jogos mais populares na nuvem
-pub const SIGL_POPULAR: &str = "85a3c442-3132-4e94-af35-7726ac86f8cb";
+pub const SIGL_POPULAR: &str = "6a589fa0-d493-472b-8e20-3813699d7056";
 
-/// Jogos saindo em breve do serviço
-pub const SIGL_LEAVING: &str = "9a0a39cb-c75b-4bf3-96f3-15fcdb5b7b13";
+/// Jogos saindo do catálogo em breve
+pub const SIGL_LEAVING: &str = "31ff2361-2772-4622-849b-f4f1abb4ad1b";
 
-/// Todos os jogos disponíveis via xCloud
-pub const SIGL_ALL: &str = "29a81209-df6f-41fd-a528-2ae6b91f719c";
+/// Todos os jogos disponíveis (Catálogo Completo incluindo Own-to-Play)
+pub const SIGL_ALL: &str = "1bf84c2b-0643-4591-893f-d9edb703f692";
 
 // ---------------------------------------------------------------------------
 // Tipos de dados
@@ -41,9 +42,12 @@ pub struct Game {
 
     /// Título do jogo
     pub title: String,
-
-    /// URL da cover art (formato quadrado ou 3:4)
     pub cover_url: Option<String>,
+    pub box_art_url: Option<String>,
+    pub hero_art_url: Option<String>,
+    pub poster_url: Option<String>,
+    pub is_leaving: bool,
+    pub leaving_date: Option<String>,
 
     /// Plataformas disponíveis
     pub platforms: Vec<String>,
@@ -88,6 +92,29 @@ struct CatalogProduct {
 
     #[serde(rename = "MarketProperties")]
     market_properties: Option<Vec<MarketProperty>>,
+
+    #[serde(rename = "DisplaySkuAvailabilities")]
+    #[serde(default)]
+    display_sku_availabilities: Vec<DisplaySkuAvailability>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DisplaySkuAvailability {
+    #[serde(rename = "Availabilities")]
+    #[serde(default)]
+    availabilities: Vec<Availability>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Availability {
+    #[serde(rename = "Conditions")]
+    conditions: Conditions,
+}
+
+#[derive(Debug, Deserialize)]
+struct Conditions {
+    #[serde(rename = "EndDate")]
+    end_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,52 +239,61 @@ pub async fn fetch_game_details(client: &reqwest::Client, ids: &[String]) -> Res
                 return None;
             }
 
-            // Procura a cover art: prefere "BoxArt" (3:4), fallback "Poster" ou "Tile"
-            let cover_url = localized
-                .images
-                .iter()
-                .find(|img| img.image_purpose == "BoxArt")
-                .or_else(|| {
-                    localized
-                        .images
-                        .iter()
-                        .find(|img| img.image_purpose == "Poster")
+            // Extração de capas específicas
+            let get_image = |purpose: &str| -> Option<String> {
+                localized.images.iter().find(|img| img.image_purpose == purpose).map(|img| {
+                    let mut url = img.uri.clone();
+                    if url.starts_with("//") {
+                        url = format!("https:{}", url);
+                    }
+                    format!("{}?w=320&h=426&q=80", url)
                 })
-                .or_else(|| {
-                    localized
-                        .images
-                        .iter()
-                        .find(|img| img.image_purpose == "BrandedKeyArt")
+            };
+
+            let box_art_url = get_image("BoxArt");
+            let hero_art_url = get_image("TitledHeroArt");
+            let poster_url = get_image("Poster");
+
+            // Fallback para cover_url genérica (TitledHeroArt -> BoxArt -> Poster)
+            let cover_url = hero_art_url.clone().or_else(|| box_art_url.clone()).or_else(|| poster_url.clone()).or_else(|| {
+                localized.images.first().map(|img| {
+                    let mut url = img.uri.clone();
+                    if url.starts_with("//") {
+                        url = format!("https:{}", url);
+                    }
+                    format!("{}?w=320&h=426&q=80", url)
                 })
-                .or_else(|| {
-                    localized
-                        .images
-                        .iter()
-                        .find(|img| img.image_purpose == "TitledHeroArt")
-                })
-                .or_else(|| localized.images.first())
-                .map(|img| {
-                    // Garante HTTPS e pede resolução 160x213 (tamanho do card)
-                    let uri = if img.uri.starts_with("//") {
-                        format!("https:{}", img.uri)
-                    } else {
-                        img.uri.clone()
-                    };
-                    format!("{}?w=320&h=426&q=80", uri)
-                });
+            });
 
             let release_date = product
                 .market_properties
-                .and_then(|props| props.into_iter().next())
-                .and_then(|p| p.original_release_date);
+                .as_ref()
+                .and_then(|props| props.first())
+                .and_then(|p| p.original_release_date.clone());
+
+            let mut leaving_date = None;
+            if let Some(display_sku) = product.display_sku_availabilities.first() {
+                if let Some(avail) = display_sku.availabilities.first() {
+                    if let Some(end_date) = &avail.conditions.end_date {
+                        if end_date != "9998-12-30T00:00:00.0000000Z" {
+                            leaving_date = Some(end_date.clone());
+                        }
+                    }
+                }
+            }
 
             Some(Game {
                 id: product.product_id,
                 title,
                 cover_url,
+                box_art_url,
+                hero_art_url,
+                poster_url,
                 platforms: vec!["Cloud".to_string()],
                 cloud_available: true,
                 release_date,
+                is_leaving: false,
+                leaving_date,
             })
         })
         .collect();

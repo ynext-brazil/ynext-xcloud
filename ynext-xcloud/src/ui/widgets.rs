@@ -18,12 +18,18 @@ pub enum CardStyle {
 }
 
 impl CardStyle {
-    pub fn size(&self) -> Vec2 {
+    pub fn cover_size(&self) -> Vec2 {
         match self {
             CardStyle::Tall => Vec2::new(160.0, 213.0),
             CardStyle::Wide => Vec2::new(284.0, 160.0),
             CardStyle::Square => Vec2::new(160.0, 160.0),
         }
+    }
+    
+    pub fn card_size(&self) -> Vec2 {
+        let mut size = self.cover_size();
+        size.y += 36.0; // Espaço reservado para o título abaixo da capa
+        size
     }
 }
 
@@ -45,7 +51,9 @@ pub enum CoverState {
 ///
 /// Retorna `true` se o usuário clicou no card.
 pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, style: CardStyle, is_leaving: bool, leaving_date: Option<&String>) -> bool {
-    let card_size = style.size();
+    let card_size = style.card_size();
+    let cover_size_base = style.cover_size();
+    
     let (rect, response) = ui.allocate_exact_size(card_size, Sense::click());
 
     if ui.is_rect_visible(rect) {
@@ -85,7 +93,7 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, style: CardStyle,
         }
 
         // Área da cover art (proporcional ao draw_rect expandido)
-        let cover_height = theme::CARD_COVER_HEIGHT + (expand_amount * 2.0 * (theme::CARD_COVER_HEIGHT / theme::CARD_HEIGHT));
+        let cover_height = cover_size_base.y + (expand_amount * 2.0 * (cover_size_base.y / card_size.y));
         let cover_rect = Rect::from_min_size(
             draw_rect.min,
             Vec2::new(draw_rect.width(), cover_height),
@@ -100,8 +108,31 @@ pub fn game_card(ui: &mut Ui, title: &str, cover: &CoverState, style: CardStyle,
 
         match cover {
             CoverState::Ready(texture) => {
+                let tex_size = texture.size_vec2();
+                let target_size = cover_rect.size();
+                
+                // UV cropping (object-fit: cover) to prevent any stretching
+                let image_aspect = tex_size.x / tex_size.y;
+                let target_aspect = target_size.x / target_size.y;
+
+                let uv = if image_aspect > target_aspect {
+                    let crop_width = tex_size.y * target_aspect;
+                    let crop_x = (tex_size.x - crop_width) / 2.0;
+                    Rect::from_min_max(
+                        pos2(crop_x / tex_size.x, 0.0),
+                        pos2((crop_x + crop_width) / tex_size.x, 1.0)
+                    )
+                } else {
+                    let crop_height = tex_size.x / target_aspect;
+                    let crop_y = (tex_size.y - crop_height) / 2.0;
+                    Rect::from_min_max(
+                        pos2(0.0, crop_y / tex_size.y),
+                        pos2(1.0, (crop_y + crop_height) / tex_size.y)
+                    )
+                };
+
                 let image = Image::new(texture)
-                    .maintain_aspect_ratio(true) // no xcloud, wide e tall já são pre-cortados e encaixam
+                    .uv(uv)
                     .fit_to_exact_size(cover_rect.size())
                     .rounding(cover_rounding);
                 image.paint_at(ui, cover_rect);

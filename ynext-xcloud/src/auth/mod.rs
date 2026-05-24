@@ -1,4 +1,4 @@
-//! # Ynext-Xcloud — Módulo de Autenticação Microsoft
+//! # Ynext Xcloud — Módulo de Autenticação Microsoft
 //!
 //! Este módulo implementa o fluxo completo de autenticação para o Xbox Cloud Gaming:
 //!

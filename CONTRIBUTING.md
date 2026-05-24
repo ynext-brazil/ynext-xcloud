@@ -1,6 +1,6 @@
-# Guia de Contribuição — Ynext-Xcloud
+# Guia de Contribuição — Ynext Xcloud
 
-Obrigado pelo interesse em contribuir com o Ynext-Xcloud! 🎮
+Obrigado pelo interesse em contribuir com o Ynext Xcloud! 🎮
 
 ## 🛠️ Setup de Desenvolvimento
 
@@ -68,7 +68,7 @@ src/
 ## 🐛 Reportando Bugs
 
 Use o template de issues no GitHub com:
-- Versão do Ynext-Xcloud
+- Versão do Ynext Xcloud
 - Sistema operacional e versão
 - Modelo do hardware (CPU, GPU)
 - Passos para reproduzir

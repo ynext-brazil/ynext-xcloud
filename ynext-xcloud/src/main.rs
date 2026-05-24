@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-//! # Ynext-Xcloud — Entrypoint Principal
+//! # Ynext Xcloud — Entrypoint Principal
 //!
 //! Cliente nativo open source para Xbox Cloud Gaming.
 //! Construído com Rust para altíssimo desempenho e mínimo consumo de recursos.
@@ -28,7 +28,7 @@ use gstreamer::prelude::*;
 // CLI — Interface de Linha de Comando
 // ===========================================================================
 
-/// Ynext-Xcloud: Cliente nativo Xbox Cloud Gaming
+/// Ynext Xcloud: Cliente nativo Xbox Cloud Gaming
 #[derive(Parser)]
 #[command(
     name = "ynext-xcloud",
@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
-        "🎮 Ynext-Xcloud iniciando..."
+        "🎮 Ynext Xcloud iniciando..."
     );
 
     // Executa o comando solicitado
@@ -196,7 +196,7 @@ async fn handle_stream_command(game: Option<String>) -> Result<()> {
     let mut store = TokenStore::new();
 
     println!();
-    println!("🎮 Iniciando Ynext-Xcloud Streaming...");
+    println!("🎮 Iniciando Ynext Xcloud Streaming...");
 
     if let Some(ref game_name) = game {
         println!("   Jogo selecionado: '{}'", game_name);

@@ -92,9 +92,9 @@ jobs:
       - name: 🏷️ Criar Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Ynext-Xcloud ${{ github.ref_name }}
+          name: Ynext Xcloud ${{ github.ref_name }}
           body: |
-            ## 🎮 Ynext-Xcloud ${{ github.ref_name }}
+            ## 🎮 Ynext Xcloud ${{ github.ref_name }}
 
             Cliente nativo para Xbox Cloud Gaming.
 
